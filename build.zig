@@ -13,6 +13,11 @@ pub fn build(b: *std.Build) void {
         }),
     });
 
+    // Dependencies
+    const clap = b.dependency("clap", .{});
+    exe.root_module.addImport("clap", clap.module("clap"));
+
+    // Create executable and run step
     b.installArtifact(exe);
 
     const run_step = b.step("run", "Run the app");

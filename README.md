@@ -21,3 +21,16 @@ Potential goals: Run Linux on the emulated CPU; add Factorio-specific extensions
 - [ ] F: Accurate FPU emulation (the IEEE standard used is newer than x86_64)
 - [ ] Privileged ISA
 - [ ] Additional extensions for special operations (power for Factorio)
+
+## Building
+Standard Zig build commands:
+
+- Build: `zig build`
+- Build and run: `zig build run`
+- Build and run (with arguments): `zig build run -- [arguments]`
+- Test: `zig build test`
+
+## Running
+Build artifacts land in `zig-out/bin`.
+
+Run with `-h` or `--help` to get a help menu.
