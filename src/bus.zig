@@ -1,23 +1,48 @@
 //! The memory operations operate on the bus, which addresses one unified address space including main memory,
 //! I/O mapped devices and the boot and program ROMs
 //!
-//! This emulated CPU is little-endian, as most real processors are.
+//! This emulated CPU is little-endian, as most real processors are, so the least significant bytes are stored in lower
+//! addresses.
+//!
+//! Memory map
+//!
+//!              |---------------------------|
+//!              | Unused                    |
+//!              |---------------------------|
+//! 0x0004 FFFF  | Dynamic RAM (64KB)        |
+//! 0x0004 0000  |                           |
+//!              |---------------------------|
+//!              | Unused                    |
+//!              |---------------------------|
+//! 0x0001 FFFF  | Mapped I/O (64KB)         |
+//! 0x0001 0000  |                           |
+//!              |---------------------------|
+//!              | Unused                    |
+//!              |---------------------------|
+//! 0x0000 7FFF  | Program ROM (24KB)        |
+//! 0x0000 1000  |                           |
+//!              |---------------------------|
+//! 0x0000 1FFF  | Boot ROM    (4KB)         |
+//! 0x0000 1000  | Boot address: 0x0000 1000 |
+//! 0x0000 0000  |---------------------------|
+//!
+//! This memory map is left with some gaps, leaving space to expand regions without needing to split them up.
+//! The emulator should be built so that changing these sizes is simple and easy, and the eventual Factorio
+//! port may take this exact same map or modify it according to constraints that could arise.
 
 const std = @import("std");
 
-const RamStart = 0x9000_0000;
-// 2MB of main memory
-const RamSize = 0x20_0000;
+const RamStart = 0x0004_0000;
+// 64KB of main memory
+const RamSize = 0x1_0000;
 
-const ProgramRomStart = 0x8000_0000;
-// 2MB of program ROM
-const ProgramRomSize = 0x20_0000;
+const ProgramRomStart = 0x0000_2000;
+// 24KB of program ROM
+const ProgramRomSize = 0x6000;
 
-const BootRomStart = 0x0000_0000;
-// 16KB of boot ROM
-const BootRomSize = 0x4000;
-
-// The space at 0x4000_0000 .. 0x7FFF_FFFF is dedicated to I/O mapped devices
+const BootRomStart = 0x0000_1000;
+// 4KB of boot ROM
+const BootRomSize = 0x1000;
 
 pub const Bus = struct {
     boot_rom: []u8 = undefined,
