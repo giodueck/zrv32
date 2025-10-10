@@ -1,6 +1,7 @@
 //! A Hart is to Risc-V what a Core is to x86. It is a distinct processing unit.
 
 const std = @import("std");
+const Bus = @import("bus.zig").Bus;
 
 const RTypeInstruction = packed struct(u32) {
     opcode: u7,
@@ -60,7 +61,42 @@ const instructions = .{
     .add = .{},
 };
 
+/// Keeps the result of the last Fetch operation
+const FetchBuffer = struct {
+    instruction: u32,
+};
+
+/// Keeps the result of the last Decode operation
+const DecodeBuffer = struct {
+    instruction: u32,
+};
+
+/// Keeps the result of the last Read Registers operation
+const ReadRegistersBuffer = struct {
+    instruction: u32,
+};
+
+/// Keeps the result of the last Execute operation
+const ExecuteBuffer = struct {
+    instruction: u32,
+};
+
+/// Keeps the result of the last Memory Access operation
+const MemoryAccessBuffer = struct {
+    instruction: u32,
+};
+
+// Writeback does not need to pass information to any other stage, so it doesn't get a buffer
+
 pub const Hart = struct {
     registers: [32]u32 = [_]u32{0} ** 32,
     pc: u32 = 0,
+
+    fetch_buf: FetchBuffer,
+    decode_buf: DecodeBuffer,
+    read_registers_buf: ReadRegistersBuffer,
+    execute_buf: ExecuteBuffer,
+    memory_access_buf: MemoryAccessBuffer,
+
+    bus: Bus,
 };
