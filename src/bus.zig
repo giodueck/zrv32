@@ -3,32 +3,42 @@
 //!
 //! This emulated CPU is little-endian, as most real processors are, so the least significant bytes are stored in lower
 //! addresses.
-//!
-//! Memory map
-//!
-//!              |---------------------------|
-//!              | Unused                    |
-//!              |---------------------------|
-//! 0x0004 FFFF  | Dynamic RAM (64KB)        |
-//! 0x0004 0000  |                           |
-//!              |---------------------------|
-//!              | Unused                    |
-//!              |---------------------------|
-//! 0x0001 FFFF  | Mapped I/O (64KB)         |
-//! 0x0001 0000  |                           |
-//!              |---------------------------|
-//!              | Unused                    |
-//!              |---------------------------|
-//! 0x0000 7FFF  | Program ROM (24KB)        |
-//! 0x0000 1000  |                           |
-//!              |---------------------------|
-//! 0x0000 1FFF  | Boot ROM    (4KB)         |
-//! 0x0000 1000  | Boot address: 0x0000 1000 |
-//! 0x0000 0000  |---------------------------|
-//!
-//! This memory map is left with some gaps, leaving space to expand regions without needing to split them up.
-//! The emulator should be built so that changing these sizes is simple and easy, and the eventual Factorio
-//! port may take this exact same map or modify it according to constraints that could arise.
+
+// Memory map
+//
+//              |---------------------------|
+//              | Unused                    |
+//              |---------------------------|
+// 0x0004 FFFF  | Dynamic RAM (64KB)        |
+// 0x0004 0000  |                           |
+//              |---------------------------|
+//              | Unused                    |
+//              |---------------------------|
+// 0x0001 FFFF  | Mapped I/O (64KB)         |
+// 0x0001 0000  |                           |
+//              |---------------------------|
+//              | Unused                    |
+//              |---------------------------|
+// 0x0000 7FFF  | Program ROM (24KB)        |
+// 0x0000 1000  |                           |
+//              |---------------------------|
+// 0x0000 1FFF  | Boot ROM    (4KB)         |
+// 0x0000 1000  | Boot address: 0x0000 1000 |
+// 0x0000 0000  |---------------------------|
+//
+// This memory map is left with some gaps, leaving space to expand regions without needing to split them up.
+// The emulator should be built so that changing these sizes is simple and easy, and the eventual Factorio
+// port may take this exact same map or modify it according to constraints that could arise.
+//
+// I/O devices
+// Timers: registers that count the number ticks passing in real time (60 ticks per second). They could also count
+//          in discrete intervals amounting to the number of ticks per clock cycle.
+//      - A system timer, reset only when the entire system is reset.
+//      - A user timer, reset when the user writes to it.
+//
+// Graphics? A framebuffer that may be manipulated by the CPU
+// A coprocessor? A discrete graphics/picture processor which does more complex operations on the framebuffer like
+// drawing lines or copying sprites.
 
 const std = @import("std");
 
