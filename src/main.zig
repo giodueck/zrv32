@@ -1,5 +1,6 @@
 const std = @import("std");
 const clap = @import("clap");
+const Hart = @import("hart.zig").Hart;
 
 pub fn main() !u8 {
     var arena = std.heap.ArenaAllocator{ .child_allocator = std.heap.page_allocator, .state = .{} };
@@ -86,4 +87,15 @@ pub fn main() !u8 {
     //  - Run single instruction
 
     return 0;
+}
+
+const assert = std.debug.assert;
+
+test "setState" {
+    var hart = Hart{};
+
+    hart.setState(.{ .zero = 15, .sp = 1234, .x31 = 31, .pc = 0x8000_0000 });
+    hart.registers[1] = 1;
+    hart.registers[3] = 3;
+    assert(hart.checkState(.{.x0 = 0, .x1 = 1, .x2 = 1234, .x31 = 31, .pc = 2147483648}));
 }

@@ -59,7 +59,7 @@ pub const Bus = struct {
     program_rom: []u8 = undefined,
     ram: []u8 = undefined,
 
-    allocator: std.mem.Allocator = .{},
+    allocator: std.mem.Allocator = undefined,
 
     pub fn init(self: @This(), allocator: std.mem.Allocator) !void {
         self.allocator = allocator;
@@ -74,6 +74,7 @@ pub const Bus = struct {
         self.allocator.free(self.boot_rom);
     }
 
+    /// Set a single byte
     fn setb(self: @This(), addr: u32, byte: u8) void {
         if (addr >= RamStart and addr < RamStart + RamSize) {
             self.ram[addr - RamStart] = byte;
@@ -126,6 +127,7 @@ pub const Bus = struct {
         }
     }
 
+    /// Get a single byte
     fn getb(self: @This(), addr: u32) u8 {
         if (addr >= RamStart and addr < RamStart + RamSize) {
             return self.ram[addr - RamStart];
