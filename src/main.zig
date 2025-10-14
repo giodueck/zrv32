@@ -97,5 +97,32 @@ test "setState" {
     hart.setState(.{ .zero = 15, .sp = 1234, .x31 = 31, .pc = 0x8000_0000 });
     hart.registers[1] = 1;
     hart.registers[3] = 3;
-    assert(hart.checkState(.{.x0 = 0, .x1 = 1, .x2 = 1234, .x31 = 31, .pc = 2147483648}));
+    assert(hart.checkState(.{ .x0 = 0, .x1 = 1, .x2 = 1234, .x31 = 31, .pc = 2147483648 }));
+}
+
+test "memory access control fetch" {
+    var hart = Hart{};
+    try hart.init(std.testing.allocator);
+    defer hart.deinit();
+
+    // Boot ROM
+    hart.bus.set(0x1000, 1, 4);
+    hart.bus.set(0x1004, 2, 4);
+    hart.bus.set(0x1008, 3, 4);
+
+    hart.setState(.{ .pc = 0x1000 });
+    hart.step();
+    hart.step();
+    assert(hart.checkState(.{ .pc = 0x1008, .fetch = 2 }));
+
+    // Unmapped memory
+    hart.pc = 0;
+    hart.step();
+    assert(hart.checkState(.{ .pc = 4, .fetch = 0 }));
+
+    // RAM
+    hart.bus.set(0x4_0000, 1, 4);
+    hart.pc = 0x4_0000;
+    hart.step();
+    assert(hart.checkState(.{ .pc = 0x4_0004, .fetch = 0 }));
 }

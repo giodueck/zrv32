@@ -6,25 +6,28 @@
 
 // Memory map
 //
+//              |---------------------------|   Access (Read/Write/Execute = rwx)
+//              | Unused                    |   r--
 //              |---------------------------|
-//              | Unused                    |
-//              |---------------------------|
-// 0x0004 FFFF  | Dynamic RAM (64KB)        |
+// 0x0004 FFFF  | Dynamic RAM (64KB)        |   rw-
 // 0x0004 0000  |                           |
 //              |---------------------------|
-//              | Unused                    |
+//              | Unused                    |   r--
 //              |---------------------------|
-// 0x0001 FFFF  | Mapped I/O (64KB)         |
+// 0x0001 FFFF  | Mapped I/O (64KB)         |   rw-
 // 0x0001 0000  |                           |
 //              |---------------------------|
-//              | Unused                    |
+//              | Unused                    |   r--
 //              |---------------------------|
-// 0x0000 7FFF  | Program ROM (24KB)        |
+// 0x0000 7FFF  | Program ROM (24KB)        |   --x
 // 0x0000 1000  |                           |
 //              |---------------------------|
-// 0x0000 1FFF  | Boot ROM    (4KB)         |
+// 0x0000 1FFF  | Boot ROM    (4KB)         |   --x
 // 0x0000 1000  | Boot address: 0x0000 1000 |
 // 0x0000 0000  |---------------------------|
+//
+// This is a Harvard architecture, meaning that program and data memory is separate. Thus, executable memory
+// is not readable or writable, and readable or writable memory is not executable.
 //
 // This memory map is left with some gaps, leaving space to expand regions without needing to split them up.
 // The emulator should be built so that changing these sizes is simple and easy, and the eventual Factorio
@@ -54,6 +57,40 @@ const BootRomStart = 0x0000_1000;
 // 4KB of boot ROM
 const BootRomSize = 0x1000;
 
+const AccessControl = struct {
+    read: bool = false,
+    write: bool = false,
+    execute: bool = false,
+};
+
+const MemoryMap = .{
+    .{
+        .name = "Boot ROM",
+        .access = AccessControl{
+            .execute = true,
+        },
+        .start = BootRomStart,
+        .size = BootRomSize,
+    },
+    .{
+        .name = "Program ROM",
+        .access = AccessControl{
+            .execute = true,
+        },
+        .start = ProgramRomStart,
+        .size = ProgramRomSize,
+    },
+    .{
+        .name = "Dynamic RAM",
+        .access = AccessControl{
+            .read = true,
+            .write = true,
+        },
+        .start = RamStart,
+        .size = RamSize,
+    },
+};
+
 pub const Bus = struct {
     boot_rom: []u8 = undefined,
     program_rom: []u8 = undefined,
@@ -61,7 +98,7 @@ pub const Bus = struct {
 
     allocator: std.mem.Allocator = undefined,
 
-    pub fn init(self: @This(), allocator: std.mem.Allocator) !void {
+    pub fn init(self: *@This(), allocator: std.mem.Allocator) !void {
         self.allocator = allocator;
         self.boot_rom = try self.allocator.alloc(u8, BootRomSize);
         self.program_rom = try self.allocator.alloc(u8, ProgramRomSize);
@@ -74,8 +111,9 @@ pub const Bus = struct {
         self.allocator.free(self.boot_rom);
     }
 
-    /// Set a single byte
-    fn setb(self: @This(), addr: u32, byte: u8) void {
+    /// Set a single byte.
+    /// Illegal access or illegal width will fail silently, no traps are set using this method.
+    fn setb(self: *@This(), addr: u32, byte: u8) void {
         if (addr >= RamStart and addr < RamStart + RamSize) {
             self.ram[addr - RamStart] = byte;
         } else if (addr >= ProgramRomStart and addr < ProgramRomStart + ProgramRomSize) {
@@ -92,7 +130,7 @@ pub const Bus = struct {
     ///
     /// For access from an instruction, use the store method instead.
     /// Writing to ROM is perfectly fine in this method, as it is not meant for emulator use.
-    pub fn set(self: @This(), addr: u32, value: u32, width: u3) void {
+    pub fn set(self: *@This(), addr: u32, value: u32, width: u3) void {
         var bytes_buf: [4]u8 = .{ 0, 0, 0, 0 };
         var bytes: []u8 = undefined;
 
@@ -123,11 +161,27 @@ pub const Bus = struct {
         bytes = bytes_buf[0..width];
 
         for (bytes, 0..) |b, i| {
-            self.setb(addr + i, b);
+            self.setb(addr +% @as(u32, @truncate(i)), b);
         }
     }
 
-    /// Get a single byte
+    /// Called by the CPU when setting a value at a memory address.
+    /// Applies some restrictions to what memory ranges can be written to.
+    pub fn store(self: *@This(), addr: u32, value: u32, width: u32) void {
+        // Memory regions are spaced out with gaps greater than 4 bytes, so we only need to check if the initial
+        // address is writable and can let the invalid byte writes fail silently.
+        for (@typeInfo(@TypeOf(MemoryMap)).@"struct".fields) |field| {
+            const range = @field(MemoryMap, field.name);
+
+            if (addr >= range.start and addr < range.start + range.size) {
+                if (range.access.write) self.set(addr, value, width);
+                return;
+            }
+        }
+    }
+
+    /// Get a single byte.
+    /// Illegal access will fail silently and return 0, no traps are set using this
     fn getb(self: @This(), addr: u32) u8 {
         if (addr >= RamStart and addr < RamStart + RamSize) {
             return self.ram[addr - RamStart];
@@ -154,9 +208,39 @@ pub const Bus = struct {
 
         var value: u32 = 0;
         for (0..width) |i| {
-            value |= @as(u32, self.getb(addr + i)) << (8 * i);
+            value |= @as(u32, self.getb(addr +% @as(u32, @truncate(i)))) << (8 * @as(u5, @truncate(i)));
         }
 
         return value;
+    }
+
+    /// Called by the CPU when getting a value at a memory address.
+    /// Applies some restrictions to what memory ranges can be read from.
+    pub fn load(self: *@This(), addr: u32, width: u32) u32 {
+        // Memory regions are spaced out with gaps greater than 4 bytes, so we only need to check if the initial
+        // address is writable and can let the invalid byte writes fail silently.
+        inline for (@typeInfo(@TypeOf(MemoryMap)).@"struct".fields) |field| {
+            const range = @field(MemoryMap, field.name);
+
+            if (addr >= range.start and addr < range.start + range.size) {
+                return if (range.access.read) self.get(addr, width) else 0;
+            }
+        }
+    }
+
+    /// Called by the CPU when getting a value at a memory address for execution.
+    /// Applies some restrictions to what memory ranges can be executed from.
+    pub fn fetch(self: *@This(), addr: u32) u32 {
+        // Memory regions are spaced out with gaps greater than 4 bytes, so we only need to check if the initial
+        // address is writable and can let the invalid byte writes fail silently.
+        inline for (@typeInfo(@TypeOf(MemoryMap)).@"struct".fields) |field| {
+            const range = @field(MemoryMap, field.name);
+
+            if (addr >= range.start and addr < range.start + range.size) {
+                return if (range.access.execute) self.get(addr, 4) else 0;
+            }
+        }
+
+        return 0;
     }
 };

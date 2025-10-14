@@ -162,6 +162,7 @@ const RegisterAliases = .{
 pub const Hart = struct {
     registers: [32]u32 = [_]u32{0} ** 32,
     pc: u32 = 0,
+    next_pc: u32 = 0,
 
     fetch_buf: FetchBuffer = .{},
     decode_buf: DecodeBuffer = .{},
@@ -173,7 +174,7 @@ pub const Hart = struct {
 
     allocator: std.mem.Allocator = undefined,
 
-    pub fn init(self: @This(), allocator: std.mem.Allocator) !void {
+    pub fn init(self: *@This(), allocator: std.mem.Allocator) !void {
         self.allocator = allocator;
         try self.bus.init(self.allocator);
     }
@@ -181,6 +182,8 @@ pub const Hart = struct {
     pub fn deinit(self: @This()) void {
         self.bus.deinit();
     }
+
+    // Testing methods
 
     /// Set initial state of registers and pc with an anonymous struct with the names for each register and pc
     /// as fields. Omitted fields assumed to be zero.
@@ -190,16 +193,13 @@ pub const Hart = struct {
 
             var index: u32 = 0;
             if (@hasField(@TypeOf(RegisterNames), field.name)) {
-                // std.debug.print("reg: {s} ({d}) = {d}\n", .{field.name, @field(RegisterNames, field.name), value});
                 index = @field(RegisterNames, field.name);
             } else if (@hasField(@TypeOf(RegisterAliases), field.name)) {
-                // std.debug.print("reg: {s} ({d}) = {d}\n", .{field.name, @field(RegisterAliases, field.name), value});
                 index = @field(RegisterAliases, field.name);
             } else if (comptime std.mem.eql(u8, field.name, "pc")) {
-                // std.debug.print("pc = {d}\n", .{value});
                 index = 32;
             } else {
-                @compileError("unknown field '" ++ field.name ++ "'. 'state' must only contain fields with register names or ABI mnemonic aliases, or pc");
+                @compileError("unknown field '" ++ field.name ++ "'. 'state' must only contain fields with register names or ABI mnemonic aliases, 'pc'");
             }
 
             if (index < 32) {
@@ -212,22 +212,23 @@ pub const Hart = struct {
     }
 
     /// Returns true if the fields in state match the equivalent fields in the Hart. Omitted fields are not checked.
+    /// In addition to the fields setState also accepts, state may have a 'fetch' field to check the content
+    /// of the fetch buffer.
     pub fn checkState(self: @This(), state: anytype) bool {
         inline for (@typeInfo(@TypeOf(state)).@"struct".fields) |field| {
             const value: u32 = @field(state, field.name);
 
             var index: u32 = 0;
             if (@hasField(@TypeOf(RegisterNames), field.name)) {
-                // std.debug.print("reg: {s} ({d}) = {d}\n", .{field.name, @field(RegisterNames, field.name), value});
                 index = @field(RegisterNames, field.name);
             } else if (@hasField(@TypeOf(RegisterAliases), field.name)) {
-                // std.debug.print("reg: {s} ({d}) = {d}\n", .{field.name, @field(RegisterAliases, field.name), value});
                 index = @field(RegisterAliases, field.name);
             } else if (comptime std.mem.eql(u8, field.name, "pc")) {
-                // std.debug.print("pc = {d}\n", .{value});
                 index = 32;
+            } else if (comptime std.mem.eql(u8, field.name, "fetch")) {
+                index = 33;
             } else {
-                @compileError("unknown field '" ++ field.name ++ "'. 'state' must only contain fields with register names or ABI mnemonic aliases, or pc");
+                @compileError("unknown field '" ++ field.name ++ "'. 'state' must only contain fields with register names or ABI mnemonic aliases, 'pc', or 'fetch'");
             }
 
             if (index < 32) {
@@ -235,13 +236,46 @@ pub const Hart = struct {
                     std.debug.print("Expected {d} at x{d}, got {d}\n", .{value, index, self.registers[index]});
                     return false;
                 }
-            } else {
+            } else if (index == 32) {
                 if (self.pc != value) {
                     std.debug.print("Expected {d} at pc, got {d}\n", .{value, self.pc});
+                    return false;
+                }
+            } else {
+                if (self.fetch_buf.instruction != value) {
+                    std.debug.print("Expected {d} at fetch buffer, got {d}\n", .{value, self.fetch_buf.instruction});
                     return false;
                 }
             }
         }
         return true;
+    }
+
+    // Emulation methods
+
+    /// Run a single cycle of the CPU, advancing each pipeline stage once
+    pub fn step(self: *@This()) void {
+        self.next_pc = self.pc +% 4;
+        // Pipeline detail: writeback needs to finish before reading registers begins.
+        // Since we want to use all buffers before writing to them, we do them in reverse order anyways
+
+        // 6. Writeback
+
+        // 5. Memory access
+        self.memory_access_buf.instruction = self.execute_buf.instruction;
+
+        // 4. Execute
+        self.execute_buf.instruction = self.read_registers_buf.instruction;
+
+        // 3. Read registers
+        self.read_registers_buf.instruction = self.decode_buf.instruction;
+
+        // 2. Decode
+        self.decode_buf.instruction = self.fetch_buf.instruction;
+
+        // 1. Fetch
+        self.fetch_buf.instruction = self.bus.fetch(self.pc);
+
+        self.pc = self.next_pc;
     }
 };
