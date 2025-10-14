@@ -106,7 +106,7 @@ test "memory access control fetch" {
     defer hart.deinit();
 
     // Boot ROM
-    hart.bus.set(0x1000, 1, 4);
+    hart.bus.set(0x1000, 0b0010011, 4); // NOP
     hart.bus.set(0x1004, 2, 4);
     hart.bus.set(0x1008, 3, 4);
 

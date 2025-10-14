@@ -3,6 +3,7 @@
 const std = @import("std");
 const Bus = @import("bus.zig").Bus;
 
+// zig fmt: off
 const RTypeInstruction = packed struct(u32) {
     opcode: u7,
     rd: u5,
@@ -55,6 +56,46 @@ const JTypeInstruction = packed struct(u32) {
     imm3: i1,   // imm[20]
 };
 
+const InstructionTypeTag = enum { R, I, S, B, U, J, none };
+
+const InstructionUnion = union(enum) {
+    R: RTypeInstruction,
+    I: ITypeInstruction,
+    S: STypeInstruction,
+    B: BTypeInstruction,
+    U: UTypeInstruction,
+    J: JTypeInstruction,
+    none: void,
+};
+
+const Opcode = enum(u7) {
+    LOAD        = 0b0000011,
+    MISC_MEM    = 0b0001111,
+    OP_IMM      = 0b0010011,
+    AUIPC       = 0b0010111,
+    STORE       = 0b0100011,
+    OP          = 0b0110011,
+    LUI         = 0b0110111,
+    BRANCH      = 0b1100011,
+    JALR        = 0b1100111,
+    JAL         = 0b1101111,
+    SYSTEM      = 0b1110011,
+    _,
+
+    fn getType(self: @This()) InstructionTypeTag {
+        return switch (self) {
+            .OP => .R,
+            .LOAD, .MISC_MEM, .OP_IMM, .JALR, .SYSTEM => .I,
+            .STORE => .S,
+            .BRANCH => .B,
+            .LUI, .AUIPC => .U,
+            .JAL => .J,
+            else => .none,
+        };
+    }
+};
+// zig fmt: on
+
 /// Lookup table to determine how to interpret/assemble each instruction
 const instructions = .{
     // TODO
@@ -69,6 +110,7 @@ const FetchBuffer = struct {
 /// Keeps the result of the last Decode operation
 const DecodeBuffer = struct {
     instruction: u32 = 0,
+    decoded: InstructionUnion = .{ .none = @as(void, undefined) },
 };
 
 /// Keeps the result of the last Read Registers operation
@@ -233,17 +275,17 @@ pub const Hart = struct {
 
             if (index < 32) {
                 if (self.registers[index] != value) {
-                    std.debug.print("Expected {d} at x{d}, got {d}\n", .{value, index, self.registers[index]});
+                    std.debug.print("Expected {d} at x{d}, got {d}\n", .{ value, index, self.registers[index] });
                     return false;
                 }
             } else if (index == 32) {
                 if (self.pc != value) {
-                    std.debug.print("Expected {d} at pc, got {d}\n", .{value, self.pc});
+                    std.debug.print("Expected {d} at pc, got {d}\n", .{ value, self.pc });
                     return false;
                 }
             } else {
                 if (self.fetch_buf.instruction != value) {
-                    std.debug.print("Expected {d} at fetch buffer, got {d}\n", .{value, self.fetch_buf.instruction});
+                    std.debug.print("Expected {d} at fetch buffer, got {d}\n", .{ value, self.fetch_buf.instruction });
                     return false;
                 }
             }
@@ -272,6 +314,17 @@ pub const Hart = struct {
 
         // 2. Decode
         self.decode_buf.instruction = self.fetch_buf.instruction;
+        const decode_r: RTypeInstruction = @bitCast(self.decode_buf.instruction);
+        const decode_ins_type = Opcode.getType(@enumFromInt(decode_r.opcode));
+        switch (decode_ins_type) {
+            .R => self.decode_buf.decoded = .{ .R = @bitCast(self.decode_buf.instruction) },
+            .I => self.decode_buf.decoded = .{ .I = @bitCast(self.decode_buf.instruction) },
+            .S => self.decode_buf.decoded = .{ .S = @bitCast(self.decode_buf.instruction) },
+            .B => self.decode_buf.decoded = .{ .B = @bitCast(self.decode_buf.instruction) },
+            .U => self.decode_buf.decoded = .{ .U = @bitCast(self.decode_buf.instruction) },
+            .J => self.decode_buf.decoded = .{ .J = @bitCast(self.decode_buf.instruction) },
+            else => self.decode_buf.decoded = .{ .none = @as(void, undefined) },
+        }
 
         // 1. Fetch
         self.fetch_buf.instruction = self.bus.fetch(self.pc);
