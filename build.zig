@@ -2,7 +2,7 @@ const std = @import("std");
 
 pub fn build(b: *std.Build) void {
     const target = b.standardTargetOptions(.{});
-    const optimize = b.standardOptimizeOption(.{});
+    const optimize = b.standardOptimizeOption(.{.preferred_optimize_mode = .ReleaseFast});
 
     const exe = b.addExecutable(.{
         .name = "zrv32",
@@ -14,7 +14,10 @@ pub fn build(b: *std.Build) void {
     });
 
     // Dependencies
-    const clap = b.dependency("clap", .{});
+    const clap = b.dependency("clap", .{
+        .target = target,
+        .optimize = optimize,
+    });
     exe.root_module.addImport("clap", clap.module("clap"));
 
     // Create executable and run step

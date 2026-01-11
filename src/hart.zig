@@ -1,7 +1,7 @@
 //! A Hart is to Risc-V what a Core is to x86. It is a distinct processing unit.
 
 const std = @import("std");
-const Bus = @import("bus.zig").Bus;
+const bus = @import("bus.zig");
 
 // zig fmt: off
 const RTypeInstruction = packed struct(u32) {
@@ -58,7 +58,7 @@ const JTypeInstruction = packed struct(u32) {
 
 const InstructionTypeTag = enum { R, I, S, B, U, J, none };
 
-const InstructionUnion = union(enum) {
+const InstructionUnion = union(InstructionTypeTag) {
     R: RTypeInstruction,
     I: ITypeInstruction,
     S: STypeInstruction,
@@ -96,7 +96,7 @@ const Opcode = enum(u7) {
 };
 // zig fmt: on
 
-/// Lookup table to determine how to interpret/assemble each instruction
+/// Lookup table to determine how to interpret/assemble each instruction (for test assembly like "addi x1,x0,42"
 const instructions = .{
     // TODO
     .add = .{},
@@ -116,6 +116,9 @@ const DecodeBuffer = struct {
 /// Keeps the result of the last Read Registers operation
 const ReadRegistersBuffer = struct {
     instruction: u32 = 0,
+    decoded: InstructionUnion = .{ .none = @as(void, undefined) },
+    op1: u32 = 0,
+    op2: u32 = 0,
 };
 
 /// Keeps the result of the last Execute operation
@@ -212,7 +215,7 @@ pub const Hart = struct {
     execute_buf: ExecuteBuffer = .{},
     memory_access_buf: MemoryAccessBuffer = .{},
 
-    bus: Bus = undefined,
+    bus: bus.Bus = undefined,
 
     allocator: std.mem.Allocator = undefined,
 
@@ -295,6 +298,19 @@ pub const Hart = struct {
 
     // Emulation methods
 
+    /// Loads the program ROM. Fails silently, TODO don't
+    pub fn loadROM(self: *@This(), rom: []const u32) void {
+        for (rom, 0..) |word, i| {
+            self.bus.set(bus.BootRomStart + @as(u32, @intCast(i * 4)), word, 4);
+        }
+    }
+
+    /// Sets the register rn to the value val, then sets x0 to 0.
+    fn setReg(self: @This(), rn: u5, val: u32) void {
+        self.registers[rn] = val;
+        self.registers[0] = 0;
+    }
+
     /// Run a single cycle of the CPU, advancing each pipeline stage once
     pub fn step(self: *@This()) void {
         self.next_pc = self.pc +% 4;
@@ -311,6 +327,9 @@ pub const Hart = struct {
 
         // 3. Read registers
         self.read_registers_buf.instruction = self.decode_buf.instruction;
+        self.read_registers_buf.decoded = self.decode_buf.decoded;
+        self.readRegisters(&self.read_registers_buf);
+        std.debug.print("{any}\n", .{self.read_registers_buf});
 
         // 2. Decode
         self.decode_buf.instruction = self.fetch_buf.instruction;
@@ -325,10 +344,45 @@ pub const Hart = struct {
             .J => self.decode_buf.decoded = .{ .J = @bitCast(self.decode_buf.instruction) },
             else => self.decode_buf.decoded = .{ .none = @as(void, undefined) },
         }
+        std.debug.print("{any}\n", .{self.decode_buf});
 
         // 1. Fetch
         self.fetch_buf.instruction = self.bus.fetch(self.pc);
+        std.debug.print("{any}\n", .{self.fetch_buf});
 
         self.pc = self.next_pc;
+    }
+
+    /// Reads the needed registers into the Read Registers step buffer.
+    fn readRegisters(self: *@This(), buf: *ReadRegistersBuffer) void {
+        switch (buf.decoded) {
+            .R, => |value| {
+                buf.op1 = self.registers[value.rs1];
+                buf.op2 = self.registers[value.rs2];
+            },
+            .I, => |value| {
+                buf.op1 = self.registers[value.rs1];
+                buf.op2 = 0;
+            },
+            .S, => |value| {
+                buf.op1 = self.registers[value.rs1];
+                buf.op2 = self.registers[value.rs2];
+            },
+            .B, => |value| {
+                buf.op1 = self.registers[value.rs1];
+                buf.op2 = self.registers[value.rs2];
+            },
+            .U, => |value| {
+                _ = value;
+                buf.op1 = 0;
+                buf.op2 = 0;
+            },
+            .J, => |value| {
+                _ = value;
+                buf.op1 = 0;
+                buf.op2 = 0;
+            },
+            else => {}
+        }
     }
 };

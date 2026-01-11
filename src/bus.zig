@@ -45,17 +45,17 @@
 
 const std = @import("std");
 
-const RamStart = 0x0004_0000;
+pub const RamStart = 0x0004_0000;
 // 64KB of main memory
-const RamSize = 0x1_0000;
+pub const RamSize = 0x1_0000;
 
-const ProgramRomStart = 0x0000_2000;
+pub const ProgramRomStart = 0x0000_2000;
 // 24KB of program ROM
-const ProgramRomSize = 0x6000;
+pub const ProgramRomSize = 0x6000;
 
-const BootRomStart = 0x0000_1000;
+pub const BootRomStart = 0x0000_1000;
 // 4KB of boot ROM
-const BootRomSize = 0x1000;
+pub const BootRomSize = 0x1000;
 
 const AccessControl = struct {
     read: bool = false,
