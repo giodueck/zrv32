@@ -2,105 +2,7 @@
 
 const std = @import("std");
 const bus = @import("bus.zig");
-
-// zig fmt: off
-const RTypeInstruction = packed struct(u32) {
-    opcode: u7,
-    rd: u5,
-    funct3: u3,
-    rs1: u5,
-    rs2: u5,
-    funct7: u7,
-};
-
-const ITypeInstruction = packed struct(u32) {
-    opcode: u7,
-    rd: u5,
-    funct3: u3,
-    rs1: u5,
-    imm: i12,
-};
-
-const STypeInstruction = packed struct(u32) {
-    opcode: u7,
-    imml: u5,   // imm[0:4]
-    funct3: u3,
-    rs1: u5,
-    rs2: u5,
-    immh: i7,   // imm[5:11]
-};
-
-const BTypeInstruction = packed struct(u32) {
-    opcode: u7,
-    imm2: u1,   // imm[11]
-    imm0: u4,   // imm[1:4]
-    funct3: u3,
-    rs1: u5,
-    rs2: u5,
-    imm1: u6,   // imm[5:10]
-    imm3: i1,   // imm[12]
-};
-
-const UTypeInstruction = packed struct(u32) {
-    opcode: u7,
-    rd: u5,
-    imm: i20,   // imm[12:31]
-};
-
-const JTypeInstruction = packed struct(u32) {
-    opcode: u7,
-    rd: u5,
-    imm2: u8,   // imm[12:19]
-    imm1: u1,   // imm[11]
-    imm0: u10,  // imm[1:10]
-    imm3: i1,   // imm[20]
-};
-
-const InstructionTypeTag = enum { R, I, S, B, U, J, none };
-
-const InstructionUnion = union(InstructionTypeTag) {
-    R: RTypeInstruction,
-    I: ITypeInstruction,
-    S: STypeInstruction,
-    B: BTypeInstruction,
-    U: UTypeInstruction,
-    J: JTypeInstruction,
-    none: void,
-};
-
-const Opcode = enum(u7) {
-    LOAD        = 0b0000011,
-    MISC_MEM    = 0b0001111,
-    OP_IMM      = 0b0010011,
-    AUIPC       = 0b0010111,
-    STORE       = 0b0100011,
-    OP          = 0b0110011,
-    LUI         = 0b0110111,
-    BRANCH      = 0b1100011,
-    JALR        = 0b1100111,
-    JAL         = 0b1101111,
-    SYSTEM      = 0b1110011,
-    _,
-
-    fn getType(self: @This()) InstructionTypeTag {
-        return switch (self) {
-            .OP => .R,
-            .LOAD, .MISC_MEM, .OP_IMM, .JALR, .SYSTEM => .I,
-            .STORE => .S,
-            .BRANCH => .B,
-            .LUI, .AUIPC => .U,
-            .JAL => .J,
-            else => .none,
-        };
-    }
-};
-// zig fmt: on
-
-/// Lookup table to determine how to interpret/assemble each instruction (for test assembly like "addi x1,x0,42"
-const instructions = .{
-    // TODO
-    .add = .{},
-};
+const riscv = @import("riscv.zig");
 
 /// Keeps the result of the last Fetch operation
 const FetchBuffer = struct {
@@ -110,13 +12,13 @@ const FetchBuffer = struct {
 /// Keeps the result of the last Decode operation
 const DecodeBuffer = struct {
     instruction: u32 = 0,
-    decoded: InstructionUnion = .{ .none = @as(void, undefined) },
+    decoded: riscv.InstructionUnion = .{ .none = @as(void, undefined) },
 };
 
 /// Keeps the result of the last Read Registers operation
 const ReadRegistersBuffer = struct {
     instruction: u32 = 0,
-    decoded: InstructionUnion = .{ .none = @as(void, undefined) },
+    decoded: riscv.InstructionUnion = .{ .none = @as(void, undefined) },
     op1: u32 = 0,
     op2: u32 = 0,
 };
@@ -124,6 +26,9 @@ const ReadRegistersBuffer = struct {
 /// Keeps the result of the last Execute operation
 const ExecuteBuffer = struct {
     instruction: u32 = 0,
+    decoded: riscv.InstructionUnion = .{ .none = @as(void, undefined) },
+    op1: u32 = 0,
+    op2: u32 = 0,
 };
 
 /// Keeps the result of the last Memory Access operation
@@ -132,77 +37,6 @@ const MemoryAccessBuffer = struct {
 };
 
 // Writeback does not need to pass information to any other stage, so it doesn't get a buffer
-
-const RegisterNames = .{
-    .x0 = 0,
-    .x1 = 1,
-    .x2 = 2,
-    .x3 = 3,
-    .x4 = 4,
-    .x5 = 5,
-    .x6 = 6,
-    .x7 = 7,
-    .x8 = 8,
-    .x9 = 9,
-    .x10 = 10,
-    .x11 = 11,
-    .x12 = 12,
-    .x13 = 13,
-    .x14 = 14,
-    .x15 = 15,
-    .x16 = 16,
-    .x17 = 17,
-    .x18 = 18,
-    .x19 = 19,
-    .x20 = 20,
-    .x21 = 21,
-    .x22 = 22,
-    .x23 = 23,
-    .x24 = 24,
-    .x25 = 25,
-    .x26 = 26,
-    .x27 = 27,
-    .x28 = 28,
-    .x29 = 29,
-    .x30 = 30,
-    .x31 = 31,
-};
-
-/// When not using xN for a register name, these are the aliases to use
-const RegisterAliases = .{
-    .zero = 0,
-    .ra = 1,
-    .sp = 2,
-    .gp = 3,
-    .tp = 4,
-    .t0 = 5,
-    .t1 = 6,
-    .t2 = 7,
-    .s0 = 8,
-    .s1 = 9,
-    .a0 = 10,
-    .a1 = 11,
-    .a2 = 12,
-    .a3 = 13,
-    .a4 = 14,
-    .a5 = 15,
-    .a6 = 16,
-    .a7 = 17,
-    .s2 = 18,
-    .s3 = 19,
-    .s4 = 20,
-    .s5 = 21,
-    .s6 = 22,
-    .s7 = 23,
-    .s8 = 24,
-    .s9 = 25,
-    .s10 = 26,
-    .s11 = 27,
-    .t3 = 28,
-    .t4 = 29,
-    .t5 = 30,
-    .t6 = 31,
-};
 
 pub const Hart = struct {
     registers: [32]u32 = [_]u32{0} ** 32,
@@ -237,10 +71,10 @@ pub const Hart = struct {
             const value: u32 = @field(state, field.name);
 
             var index: u32 = 0;
-            if (@hasField(@TypeOf(RegisterNames), field.name)) {
-                index = @field(RegisterNames, field.name);
-            } else if (@hasField(@TypeOf(RegisterAliases), field.name)) {
-                index = @field(RegisterAliases, field.name);
+            if (@hasField(@TypeOf(riscv.RegisterNames), field.name)) {
+                index = @field(riscv.RegisterNames, field.name);
+            } else if (@hasField(@TypeOf(riscv.RegisterAliases), field.name)) {
+                index = @field(riscv.RegisterAliases, field.name);
             } else if (comptime std.mem.eql(u8, field.name, "pc")) {
                 index = 32;
             } else {
@@ -264,10 +98,10 @@ pub const Hart = struct {
             const value: u32 = @field(state, field.name);
 
             var index: u32 = 0;
-            if (@hasField(@TypeOf(RegisterNames), field.name)) {
-                index = @field(RegisterNames, field.name);
-            } else if (@hasField(@TypeOf(RegisterAliases), field.name)) {
-                index = @field(RegisterAliases, field.name);
+            if (@hasField(@TypeOf(riscv.RegisterNames), field.name)) {
+                index = @field(riscv.RegisterNames, field.name);
+            } else if (@hasField(@TypeOf(riscv.RegisterAliases), field.name)) {
+                index = @field(riscv.RegisterAliases, field.name);
             } else if (comptime std.mem.eql(u8, field.name, "pc")) {
                 index = 32;
             } else if (comptime std.mem.eql(u8, field.name, "fetch")) {
@@ -296,12 +130,29 @@ pub const Hart = struct {
         return true;
     }
 
+    /// Load a single encoded instruction, flush the pipeline, then step through until every pipeline step
+    /// ran the given instruction.
+    pub fn exec(self: *@This(), instr: u32) void {
+        self.fetch_buf = FetchBuffer{};
+        self.decode_buf = DecodeBuffer{};
+        self.read_registers_buf = ReadRegistersBuffer{};
+        self.execute_buf = ExecuteBuffer{};
+        self.memory_access_buf = MemoryAccessBuffer{};
+
+        self.bus.boot_rom[0] = instr;
+        self.pc = self.bus.boot_rom_start;
+
+        inline for (0..6) |_| {
+            self.step();
+        }
+    }
+
     // Emulation methods
 
     /// Loads the program ROM. Fails silently, TODO don't
     pub fn loadROM(self: *@This(), rom: []const u32) void {
         for (rom, 0..) |word, i| {
-            self.bus.set(bus.BootRomStart + @as(u32, @intCast(i * 4)), word, 4);
+            self.bus.set(self.bus.boot_rom_start + @as(u32, @intCast(i * 4)), word, 4);
         }
     }
 
@@ -333,8 +184,8 @@ pub const Hart = struct {
 
         // 2. Decode
         self.decode_buf.instruction = self.fetch_buf.instruction;
-        const decode_r: RTypeInstruction = @bitCast(self.decode_buf.instruction);
-        const decode_ins_type = Opcode.getType(@enumFromInt(decode_r.opcode));
+        const decode_r: riscv.RTypeInstruction = @bitCast(self.decode_buf.instruction);
+        const decode_ins_type = riscv.Opcode.getType(@enumFromInt(decode_r.opcode));
         switch (decode_ins_type) {
             .R => self.decode_buf.decoded = .{ .R = @bitCast(self.decode_buf.instruction) },
             .I => self.decode_buf.decoded = .{ .I = @bitCast(self.decode_buf.instruction) },
@@ -356,33 +207,56 @@ pub const Hart = struct {
     /// Reads the needed registers into the Read Registers step buffer.
     fn readRegisters(self: *@This(), buf: *ReadRegistersBuffer) void {
         switch (buf.decoded) {
-            .R, => |value| {
+            .R => |value| {
                 buf.op1 = self.registers[value.rs1];
                 buf.op2 = self.registers[value.rs2];
             },
-            .I, => |value| {
+            .I => |value| {
                 buf.op1 = self.registers[value.rs1];
                 buf.op2 = 0;
             },
-            .S, => |value| {
+            .S => |value| {
                 buf.op1 = self.registers[value.rs1];
                 buf.op2 = self.registers[value.rs2];
             },
-            .B, => |value| {
+            .B => |value| {
                 buf.op1 = self.registers[value.rs1];
                 buf.op2 = self.registers[value.rs2];
             },
-            .U, => |value| {
+            .U => |value| {
                 _ = value;
                 buf.op1 = 0;
                 buf.op2 = 0;
             },
-            .J, => |value| {
+            .J => |value| {
                 _ = value;
                 buf.op1 = 0;
                 buf.op2 = 0;
             },
-            else => {}
+            else => {},
+        }
+    }
+
+    /// Executes the instruction
+    fn execute(self: *@This(), buf: *ExecuteBuffer) void {
+        _ = self;
+        // TODO finish
+        switch (buf.decoded) {
+            .R => {},
+            .I => |value| {
+                switch (value.opcode) {
+                    .LOAD => {},
+                    .MISC_MEM => {},
+                    .OP_IMM => {},
+                    .JALR => {},
+                    .SYSTEM => {},
+                }
+            },
+            .S => {},
+            .B => {},
+            .U => {},
+            .J => {},
+            else => {},
         }
     }
 };

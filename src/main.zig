@@ -128,3 +128,18 @@ test "memory access control fetch" {
     hart.step();
     assert(hart.checkState(.{ .pc = 0x4_0004, .fetch = 0 }));
 }
+
+pub fn checkInstr(initial_state: anytype, comptime instr: []const u8, new_state: anytype) !void {
+    var hart = Hart{};
+    try hart.init(std.testing.allocator);
+    defer hart.deinit();
+
+    hart.setState(initial_state);
+
+    
+
+    std.testing.expect(hart.checkState(new_state));
+}
+
+test "addi" {
+}

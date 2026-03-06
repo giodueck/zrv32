@@ -98,6 +98,13 @@ pub const Bus = struct {
 
     allocator: std.mem.Allocator = undefined,
 
+    ram_start: u32 = RamStart,
+    ram_size: u32 = RamSize,
+    program_rom_start: u32 = ProgramRomStart,
+    program_rom_size: u32 = ProgramRomSize,
+    boot_rom_start: u32 = BootRomStart,
+    boot_rom_size: u32 = BootRomSize,
+
     pub fn init(self: *@This(), allocator: std.mem.Allocator) !void {
         self.allocator = allocator;
         self.boot_rom = try self.allocator.alloc(u8, BootRomSize);
