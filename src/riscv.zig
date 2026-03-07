@@ -188,6 +188,11 @@ pub fn getIImmediate(instr: u32) u32 {
     return ret;
 }
 
+/// Returns the U-Immediate generated from the instruction.
+pub inline fn getUImmediate(instr: u32) u32 {
+    return instr & 0xFFFF_F000;
+}
+
 // For testing
 
 pub fn assemble(comptime instr: []const u8) u32 {
@@ -213,6 +218,8 @@ const instructions = .{
     .slli = .{ .func = assembleITypeShift, .opcode = Opcode.OP_IMM, .funct3 = Funct3.OP_IMM.slli },
     .srli = .{ .func = assembleITypeShift, .opcode = Opcode.OP_IMM, .funct3 = Funct3.OP_IMM.srli },
     .srai = .{ .func = assembleITypeShift, .opcode = Opcode.OP_IMM, .funct3 = Funct3.OP_IMM.srai, .arithmetic = true },
+    .lui = .{ .func = assembleUType, .opcode = Opcode.LUI },
+    .auipc = .{ .func = assembleUType, .opcode = Opcode.AUIPC },
 };
 
 fn parseRegister(comptime name: []const u8) u5 {
@@ -263,6 +270,25 @@ fn assembleITypeShift(comptime args: *std.mem.TokenIterator(u8, .any), comptime 
         .funct3 = info.funct3,
         .rs1 = rs1,
         .imm = imm | (imm_upper << 5),
+    });
+}
+
+fn assembleUType(comptime args: *std.mem.TokenIterator(u8, .any), comptime info: anytype) u32 {
+    const rd = parseRegister(args.next() orelse unreachable);
+    const imm = comptime a: {
+        if (@hasField(@TypeOf(info), "imm")) {
+            if (info.imm & 0xFFF != 0) @compileError("Immediate must have 12 least-significant bits 0");
+            break :a info.imm;
+        }
+        const parsed = std.fmt.parseInt(i32, args.next() orelse unreachable, 10) catch unreachable;
+        if (parsed & 0xFFF != 0) @compileError("Immediate must have 12 least-significant bits 0");
+        break :a parsed;
+    };
+
+    return @bitCast(UTypeInstruction{
+        .opcode = @intFromEnum(info.opcode),
+        .rd = rd,
+        .imm = @truncate(imm >> 12),
     });
 }
 

@@ -284,7 +284,17 @@ pub const Hart = struct {
             },
             .S => {},
             .B => {},
-            .U => {},
+            .U => |value| {
+                switch (value.opcode) {
+                    @intFromEnum(riscv.Opcode.LUI) => {
+                        executeLui(self, buf);
+                    },
+                    @intFromEnum(riscv.Opcode.AUIPC) => {
+                        executeAuipc(self, buf);
+                    },
+                    else => {}, // TODO handle unimplemented or illegal instructions
+                }
+            },
             .J => {},
             else => {},
         }
@@ -333,6 +343,16 @@ pub const Hart = struct {
                 // TODO handle illegal instructions
             },
         }
+    }
+
+    fn executeLui(self: *@This(), buf: *ExecuteBuffer) void {
+        _ = self;
+        buf.res = riscv.getUImmediate(buf.instruction);
+    }
+
+    fn executeAuipc(self: *@This(), buf: *ExecuteBuffer) void {
+        // This accounts for pipeline steps, so the PC gotten is the address of this exact instruction
+        buf.res = self.pc -% 12 +% riscv.getUImmediate(buf.instruction);
     }
 
     /// Executes memory access operations like LOAD and STORE

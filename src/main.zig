@@ -173,3 +173,12 @@ test "slli, srli, srai" {
     try checkInstr(.{ .s0 = 0xC000_0000 }, "srli s1, s0, 30", .{ .s0 = 0xC000_0000, .s1 = 3 });
     try checkInstr(.{ .s0 = 0xC000_0000 }, "srai s1, s0, 30", .{ .s0 = 0xC000_0000, .s1 = 0xFFFF_FFFF });
 }
+
+test "lui, auipc" {
+    // To construct a 32 bit immediate with LUI+ADDI we need to compensate for sign extension by adding 4096 to
+    // the upper immediate. To construct 0x0bee_ffff, we use (0x0bee_f000 + 0x1000) and 0xfff
+    try checkInstr(.{ .s0 = 4095 }, "lui s0, 200212480", .{ .s0 = 0xbef0000 });
+    try checkInstr(.{ .s0 = 0xbef0000 }, "addi s0, s0, -1", .{ .s0 = 0xbeeffff });
+    try checkInstr(.{ .s0 = 0 }, "auipc s0, 0", .{ .s0 = 4096 }); // boot ROM start
+    try checkInstr(.{ .s0 = 0 }, "auipc s0, 4096", .{ .s0 = 8192 }); // boot ROM start + offset
+}
