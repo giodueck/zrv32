@@ -1,6 +1,7 @@
 const std = @import("std");
 const clap = @import("clap");
 const Hart = @import("hart.zig").Hart;
+const riscv = @import("riscv.zig");
 
 pub fn main() !u8 {
     var arena = std.heap.ArenaAllocator{ .child_allocator = std.heap.page_allocator, .state = .{} };
@@ -89,7 +90,7 @@ pub fn main() !u8 {
     return 0;
 }
 
-const assert = std.debug.assert;
+const expect = std.testing.expect;
 
 test "setState" {
     var hart = Hart{};
@@ -97,7 +98,7 @@ test "setState" {
     hart.setState(.{ .zero = 15, .sp = 1234, .x31 = 31, .pc = 0x8000_0000 });
     hart.registers[1] = 1;
     hart.registers[3] = 3;
-    assert(hart.checkState(.{ .x0 = 0, .x1 = 1, .x2 = 1234, .x31 = 31, .pc = 2147483648 }));
+    try expect(hart.checkState(.{ .x0 = 0, .x1 = 1, .x2 = 1234, .x31 = 31, .pc = 2147483648 }));
 }
 
 test "memory access control fetch" {
@@ -115,18 +116,18 @@ test "memory access control fetch" {
     hart.setState(.{ .pc = 0x1000 });
     hart.step();
     hart.step();
-    assert(hart.checkState(.{ .pc = 0x1008, .fetch = 2 }));
+    try expect(hart.checkState(.{ .pc = 0x1008, .fetch = 2 }));
 
     // Unmapped memory
     hart.pc = 0;
     hart.step();
-    assert(hart.checkState(.{ .pc = 4, .fetch = 0 }));
+    try expect(hart.checkState(.{ .pc = 4, .fetch = 0 }));
 
     // RAM
     hart.bus.set(0x4_0000, 1, 4);
     hart.pc = 0x4_0000;
     hart.step();
-    assert(hart.checkState(.{ .pc = 0x4_0004, .fetch = 0 }));
+    try expect(hart.checkState(.{ .pc = 0x4_0004, .fetch = 0 }));
 }
 
 pub fn checkInstr(initial_state: anytype, comptime instr: []const u8, new_state: anytype) !void {
@@ -136,10 +137,13 @@ pub fn checkInstr(initial_state: anytype, comptime instr: []const u8, new_state:
 
     hart.setState(initial_state);
 
-    
+    const encoded_instr = riscv.assemble(instr);
+    hart.exec(encoded_instr);
 
-    std.testing.expect(hart.checkState(new_state));
+    try std.testing.expect(hart.checkState(new_state));
 }
 
 test "addi" {
+    try checkInstr(.{.x8 = 15}, "addi x9, x8, 20", .{.x8 = 15, .x9 = 35});
+    try checkInstr(.{.x8 = 15}, "addi x9, x8, -20", .{.x8 = 15, .x9 = @as(u32, @bitCast(@as(i32, -5)))});
 }

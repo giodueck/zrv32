@@ -29,11 +29,16 @@ const ExecuteBuffer = struct {
     decoded: riscv.InstructionUnion = .{ .none = @as(void, undefined) },
     op1: u32 = 0,
     op2: u32 = 0,
+    res: u32 = 0,
 };
 
 /// Keeps the result of the last Memory Access operation
 const MemoryAccessBuffer = struct {
     instruction: u32 = 0,
+    decoded: riscv.InstructionUnion = .{ .none = @as(void, undefined) },
+    op1: u32 = 0,
+    op2: u32 = 0,
+    res: u32 = 0,
 };
 
 // Writeback does not need to pass information to any other stage, so it doesn't get a buffer
@@ -49,7 +54,7 @@ pub const Hart = struct {
     execute_buf: ExecuteBuffer = .{},
     memory_access_buf: MemoryAccessBuffer = .{},
 
-    bus: bus.Bus = undefined,
+    bus: bus.Bus = .{},
 
     allocator: std.mem.Allocator = undefined,
 
@@ -139,7 +144,7 @@ pub const Hart = struct {
         self.execute_buf = ExecuteBuffer{};
         self.memory_access_buf = MemoryAccessBuffer{};
 
-        self.bus.boot_rom[0] = instr;
+        self.bus.set(self.bus.boot_rom_start, instr, 4);
         self.pc = self.bus.boot_rom_start;
 
         inline for (0..6) |_| {
@@ -157,7 +162,7 @@ pub const Hart = struct {
     }
 
     /// Sets the register rn to the value val, then sets x0 to 0.
-    fn setReg(self: @This(), rn: u5, val: u32) void {
+    fn setReg(self: *@This(), rn: u5, val: u32) void {
         self.registers[rn] = val;
         self.registers[0] = 0;
     }
@@ -169,18 +174,28 @@ pub const Hart = struct {
         // Since we want to use all buffers before writing to them, we do them in reverse order anyways
 
         // 6. Writeback
+        self.writeback(&self.memory_access_buf);
 
         // 5. Memory access
         self.memory_access_buf.instruction = self.execute_buf.instruction;
+        self.memory_access_buf.instruction = self.execute_buf.instruction;
+        self.memory_access_buf.decoded = self.execute_buf.decoded;
+        self.memory_access_buf.op1 = self.execute_buf.op1;
+        self.memory_access_buf.op2 = self.execute_buf.op2;
+        self.memory_access_buf.res = self.execute_buf.res;
+        self.memoryAccess(&self.memory_access_buf);
 
         // 4. Execute
         self.execute_buf.instruction = self.read_registers_buf.instruction;
+        self.execute_buf.decoded = self.read_registers_buf.decoded;
+        self.execute_buf.op1 = self.read_registers_buf.op1;
+        self.execute_buf.op2 = self.read_registers_buf.op2;
+        self.execute(&self.execute_buf);
 
         // 3. Read registers
         self.read_registers_buf.instruction = self.decode_buf.instruction;
         self.read_registers_buf.decoded = self.decode_buf.decoded;
         self.readRegisters(&self.read_registers_buf);
-        std.debug.print("{any}\n", .{self.read_registers_buf});
 
         // 2. Decode
         self.decode_buf.instruction = self.fetch_buf.instruction;
@@ -195,17 +210,17 @@ pub const Hart = struct {
             .J => self.decode_buf.decoded = .{ .J = @bitCast(self.decode_buf.instruction) },
             else => self.decode_buf.decoded = .{ .none = @as(void, undefined) },
         }
-        std.debug.print("{any}\n", .{self.decode_buf});
 
         // 1. Fetch
         self.fetch_buf.instruction = self.bus.fetch(self.pc);
-        std.debug.print("{any}\n", .{self.fetch_buf});
 
         self.pc = self.next_pc;
     }
 
     /// Reads the needed registers into the Read Registers step buffer.
     fn readRegisters(self: *@This(), buf: *ReadRegistersBuffer) void {
+        buf.op1 = 0;
+        buf.op2 = 0;
         switch (buf.decoded) {
             .R => |value| {
                 buf.op1 = self.registers[value.rs1];
@@ -213,7 +228,6 @@ pub const Hart = struct {
             },
             .I => |value| {
                 buf.op1 = self.registers[value.rs1];
-                buf.op2 = 0;
             },
             .S => |value| {
                 buf.op1 = self.registers[value.rs1];
@@ -223,33 +237,27 @@ pub const Hart = struct {
                 buf.op1 = self.registers[value.rs1];
                 buf.op2 = self.registers[value.rs2];
             },
-            .U => |value| {
-                _ = value;
-                buf.op1 = 0;
-                buf.op2 = 0;
-            },
-            .J => |value| {
-                _ = value;
-                buf.op1 = 0;
-                buf.op2 = 0;
-            },
+            .U, .J => {},
             else => {},
         }
     }
 
     /// Executes the instruction
     fn execute(self: *@This(), buf: *ExecuteBuffer) void {
-        _ = self;
+        buf.res = 0;
         // TODO finish
         switch (buf.decoded) {
             .R => {},
             .I => |value| {
                 switch (value.opcode) {
-                    .LOAD => {},
-                    .MISC_MEM => {},
-                    .OP_IMM => {},
-                    .JALR => {},
-                    .SYSTEM => {},
+                    @intFromEnum(riscv.Opcode.LOAD) => {},
+                    @intFromEnum(riscv.Opcode.MISC_MEM) => {},
+                    @intFromEnum(riscv.Opcode.OP_IMM) => {
+                        executeOpImm(self, buf);
+                    },
+                    @intFromEnum(riscv.Opcode.JALR) => {},
+                    @intFromEnum(riscv.Opcode.SYSTEM) => {},
+                    else => {}, // TODO handle unimplemented or illegal instructions
                 }
             },
             .S => {},
@@ -257,6 +265,41 @@ pub const Hart = struct {
             .U => {},
             .J => {},
             else => {},
+        }
+    }
+
+    fn executeOpImm(self: *@This(), buf: *ExecuteBuffer) void {
+        _ = self;
+        const decoded: riscv.ITypeInstruction = @bitCast(buf.instruction);
+        switch (decoded.funct3) {
+            riscv.Funct3.OP_IMM.addi => {
+                buf.res = buf.op1 + riscv.getIImmediate(buf.instruction);
+            },
+            // TODO finish other funct3
+            else => {
+                // TODO handle illegal instructions
+            },
+        }
+    }
+
+    /// Executes memory access operations like LOAD and STORE
+    fn memoryAccess(self: *@This(), buf: *MemoryAccessBuffer) void {
+        _ = self;
+        _ = buf;
+    }
+
+    /// Writes pipeline results to the register file
+    fn writeback(self: *@This(), buf: *MemoryAccessBuffer) void {
+        var rd: u5 = 0;
+        switch (buf.decoded) {
+            .R => |value| {rd = value.rd;},
+            .I => |value| {rd = value.rd;},
+            .U => |value| {rd = value.rd;},
+            .J => |value| {rd = value.rd;},
+            else => {},
+        }
+        if (rd != 0) {
+            self.setReg(rd, buf.res);
         }
     }
 };

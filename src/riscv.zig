@@ -178,6 +178,16 @@ pub const RegisterAliases = .{
     .t6 = 31,
 };
 
+/// Returns the I-Immediate generated from the instruction.
+pub fn getIImmediate(instr: u32) u32 {
+    var ret: u32 = instr >> 20;
+    // Sign-extend
+    if (instr >> 31 == 1) {
+        ret |= @truncate(0xFFFF_FFFF << 12);
+    }
+    return ret;
+}
+
 // For testing
 
 pub fn assemble(comptime instr: []const u8) u32 {
@@ -193,7 +203,7 @@ const instructions = .{
     .addi = .{ .func = assembleIType, .opcode = Opcode.OP_IMM, .funct3 = Funct3.OP_IMM.addi },
 };
 
-fn parseRegister(comptime name: []u8) u5 {
+fn parseRegister(comptime name: []const u8) u5 {
     if (@hasField(@TypeOf(RegisterNames), name)) {
         return @field(RegisterNames, name);
     } else if (@hasField(@TypeOf(RegisterAliases), name)) {
@@ -215,7 +225,7 @@ fn assembleIType(comptime args: *std.mem.TokenIterator(u8, .any), comptime info:
     comptime std.debug.assert(args.next() == null);
 
     return @bitCast(ITypeInstruction{
-        .opcode = info.opcode,
+        .opcode = @intFromEnum(info.opcode),
         .rd = rd,
         .funct3 = info.funct3,
         .rs1 = rs1,
