@@ -269,7 +269,14 @@ pub const Hart = struct {
         buf.res = 0;
         // TODO finish
         switch (buf.decoded) {
-            .R => {},
+            .R => |value| {
+                switch (value.opcode) {
+                    @intFromEnum(riscv.Opcode.OP) => {
+                        executeOp(self, buf);
+                    },
+                    else => {}, // TODO handle unimplemented or illegal instructions
+                }
+            },
             .I => |value| {
                 switch (value.opcode) {
                     @intFromEnum(riscv.Opcode.LOAD) => {},
@@ -353,6 +360,56 @@ pub const Hart = struct {
     fn executeAuipc(self: *@This(), buf: *ExecuteBuffer) void {
         // This accounts for pipeline steps, so the PC gotten is the address of this exact instruction
         buf.res = self.pc -% 12 +% riscv.getUImmediate(buf.instruction);
+    }
+
+    fn executeOp(self: *@This(), buf: *ExecuteBuffer) void {
+        _ = self;
+        const decoded: riscv.RTypeInstruction = @bitCast(buf.instruction);
+        switch (decoded.funct3) {
+            riscv.Funct3.OP.add => {
+                buf.res = buf.op1;
+                if (decoded.funct7 == 0) { // add
+                    buf.res +%= buf.op2;
+                } else if (decoded.funct7 == 0b0100000) { // sub
+                    buf.res -%= buf.op2;
+                } // TODO handle illegal instructions
+            },
+            riscv.Funct3.OP.slt => {
+                const rs1: i32 = @bitCast(buf.op1);
+                const rs2: i32 = @bitCast(buf.op2);
+                buf.res = if (rs1 < rs2) 1 else 0;
+            },
+            riscv.Funct3.OP.sltu => {
+                const rs1 = buf.op1;
+                const rs2 = buf.op2;
+                buf.res = if (rs1 < rs2) 1 else 0;
+            },
+            riscv.Funct3.OP.@"and" => {
+                buf.res = buf.op1 & buf.op2;
+            },
+            riscv.Funct3.OP.@"or" => {
+                buf.res = buf.op1 | buf.op2;
+            },
+            riscv.Funct3.OP.xor => {
+                buf.res = buf.op1 ^ buf.op2;
+            },
+            riscv.Funct3.OP.sll => {
+                buf.res = std.math.shl(u32, buf.op1, buf.op2 & 0x1F);
+            },
+            riscv.Funct3.OP.srl => {
+                if (decoded.funct7 == 0b0100000) {
+                    // arithmetic
+                    buf.res = std.math.shr(u32, buf.op1, buf.op2 & 0x1F);
+                    if (buf.op1 >> 31 == 1) {
+                        buf.res |= std.math.shl(u32, 0xFFFF_FFFF, 32 - (buf.op2 & 0x1F));
+                    }
+                } else if (decoded.funct7 == 0) {
+                    // logical
+                    buf.res = std.math.shr(u32, buf.op1, buf.op2 & 0x1F);
+                }
+                // TODO handle illegal instructions
+            },
+        }
     }
 
     /// Executes memory access operations like LOAD and STORE

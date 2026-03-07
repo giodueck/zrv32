@@ -95,14 +95,26 @@ pub const Opcode = enum(u7) {
 pub const Funct3 = .{
     .OP_IMM = .{
         .addi  = 0b000,
+        .slli  = 0b001,
         .slti  = 0b010,
         .sltiu = 0b011,
         .xori  = 0b100,
-        .ori   = 0b110,
-        .andi  = 0b111,
-        .slli  = 0b001,
         .srli  = 0b101,
         .srai  = 0b101,
+        .ori   = 0b110,
+        .andi  = 0b111,
+    },
+    .OP = .{
+        .add   = 0b000,
+        .sub   = 0b000,
+        .sll   = 0b001,
+        .slt   = 0b010,
+        .sltu  = 0b011,
+        .xor   = 0b100,
+        .srl   = 0b101,
+        .sra   = 0b101,
+        .@"or" = 0b110,
+        .@"and"= 0b111,
     },
 };
 
@@ -220,6 +232,17 @@ const instructions = .{
     .srai = .{ .func = assembleITypeShift, .opcode = Opcode.OP_IMM, .funct3 = Funct3.OP_IMM.srai, .arithmetic = true },
     .lui = .{ .func = assembleUType, .opcode = Opcode.LUI },
     .auipc = .{ .func = assembleUType, .opcode = Opcode.AUIPC },
+    .add = .{ .func = assembleRType, .opcode = Opcode.OP, .funct3 = Funct3.OP.add, .funct7 = 0 },
+    .sub = .{ .func = assembleRType, .opcode = Opcode.OP, .funct3 = Funct3.OP.add, .funct7 = 32 },
+    .slt = .{ .func = assembleRType, .opcode = Opcode.OP, .funct3 = Funct3.OP.slt, .funct7 = 0 },
+    .sltu = .{ .func = assembleRType, .opcode = Opcode.OP, .funct3 = Funct3.OP.sltu, .funct7 = 0 },
+    .@"and" = .{ .func = assembleRType, .opcode = Opcode.OP, .funct3 = Funct3.OP.@"and", .funct7 = 0 },
+    .@"or" = .{ .func = assembleRType, .opcode = Opcode.OP, .funct3 = Funct3.OP.@"or", .funct7 = 0 },
+    .xor = .{ .func = assembleRType, .opcode = Opcode.OP, .funct3 = Funct3.OP.xor, .funct7 = 0 },
+    .sll = .{ .func = assembleRType, .opcode = Opcode.OP, .funct3 = Funct3.OP.sll, .funct7 = 0 },
+    .srl = .{ .func = assembleRType, .opcode = Opcode.OP, .funct3 = Funct3.OP.srl, .funct7 = 0 },
+    .sra = .{ .func = assembleRType, .opcode = Opcode.OP, .funct3 = Funct3.OP.srl, .funct7 = 32 },
+    .snez = .{ .func = assembleRType, .opcode = Opcode.OP, .funct3 = Funct3.OP.sltu, .funct7 = 0, .rs1 = 0 },
 };
 
 fn parseRegister(comptime name: []const u8) u5 {
@@ -289,6 +312,21 @@ fn assembleUType(comptime args: *std.mem.TokenIterator(u8, .any), comptime info:
         .opcode = @intFromEnum(info.opcode),
         .rd = rd,
         .imm = @truncate(imm >> 12),
+    });
+}
+
+fn assembleRType(comptime args: *std.mem.TokenIterator(u8, .any), comptime info: anytype) u32 {
+    const rd = parseRegister(args.next() orelse unreachable);
+    const rs1 = if (@hasField(@TypeOf(info), "rs1")) info.rs1 else parseRegister(args.next() orelse unreachable);
+    const rs2 = parseRegister(args.next() orelse unreachable);
+
+    return @bitCast(RTypeInstruction{
+        .opcode = @intFromEnum(info.opcode),
+        .rd = rd,
+        .rs1 = rs1,
+        .rs2 = rs2,
+        .funct3 = info.funct3,
+        .funct7 = info.funct7,
     });
 }
 

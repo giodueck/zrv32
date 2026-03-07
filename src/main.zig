@@ -182,3 +182,38 @@ test "lui, auipc" {
     try checkInstr(.{ .s0 = 0 }, "auipc s0, 0", .{ .s0 = 4096 }); // boot ROM start
     try checkInstr(.{ .s0 = 0 }, "auipc s0, 4096", .{ .s0 = 8192 }); // boot ROM start + offset
 }
+
+test "add, sub" {
+    try checkInstr(.{ .s0 = 0, .s1 = 100, .s2 = 23 }, "add s0, s1, s2", .{ .s0 = 123, .s1 = 100, .s2 = 23 });
+    try checkInstr(.{ .s0 = 0, .s1 = 100, .s2 = 23 }, "sub s0, s1, s2", .{ .s0 = 77, .s1 = 100, .s2 = 23 });
+    try checkInstr(.{ .s0 = 0, .s1 = 0x7FFF_FFFF, .s2 = 1 }, "add s0, s1, s2", .{ .s0 = 0x8000_0000, .s1 = 0x7FFF_FFFF, .s2 = 1 });
+    try checkInstr(.{ .s0 = 0, .s1 = 0x8000_0000, .s2 = 1 }, "sub s0, s1, s2", .{ .s0 = 0x7FFF_FFFF, .s1 = 0x8000_0000, .s2 = 1 });
+    try checkInstr(.{ .s0 = 123, .s1 = 0x8000_0001, .s2 = 0x7FFF_FFFF }, "add s0, s1, s2", .{ .s0 = 0, .s1 = 0x8000_0001, .s2 = 0x7FFF_FFFF });
+}
+
+test "slt, sltu, snez" {
+    try checkInstr(.{ .s0 = 0, .s1 = 0, .s2 = 0 }, "slt s0, s1, s2", .{ .s0 = 0, .s1 = 0, .s2 = 0 });
+    try checkInstr(.{ .s0 = 0, .s1 = 0, .s2 = 1 }, "slt s0, s1, s2", .{ .s0 = 1, .s1 = 0, .s2 = 1 });
+    try checkInstr(.{ .s0 = 0, .s1 = @as(u32, @bitCast(@as(i32, -15))), .s2 = 1 }, "slt s0, s1, s2", .{ .s0 = 1, .s1 = @as(u32, @bitCast(@as(i32, -15))), .s2 = 1 });
+    try checkInstr(.{ .s0 = 0, .s1 = 0, .s2 = 0 }, "sltu s0, s1, s2", .{ .s0 = 0, .s1 = 0, .s2 = 0 });
+    try checkInstr(.{ .s0 = 0, .s1 = 0, .s2 = 1 }, "sltu s0, s1, s2", .{ .s0 = 1, .s1 = 0, .s2 = 1 });
+    try checkInstr(.{ .s0 = 0, .s1 = @as(u32, @bitCast(@as(i32, -15))), .s2 = 1 }, "sltu s0, s1, s2", .{ .s0 = 0, .s1 = @as(u32, @bitCast(@as(i32, -15))), .s2 = 1 });
+    try checkInstr(.{ .s0 = 0, .s1 = 0, .s2 = 0 }, "snez s0, s2", .{ .s0 = 0, .s1 = 0, .s2 = 0 });
+    try checkInstr(.{ .s0 = 0, .s1 = 0, .s2 = 1 }, "snez s0, s2", .{ .s0 = 1, .s1 = 0, .s2 = 1 });
+    try checkInstr(.{ .s0 = 0, .s1 = @as(u32, @bitCast(@as(i32, -15))), .s2 = 1 }, "snez s0, s1", .{ .s0 = 1, .s1 = @as(u32, @bitCast(@as(i32, -15))), .s2 = 1 });
+}
+
+test "and, or, xor" {
+    try checkInstr(.{ .s0 = 0, .s1 = 7, .s2 = 10 }, "and s0, s1, s2", .{ .s0 = 2, .s1 = 7, .s2 = 10 });
+    try checkInstr(.{ .s0 = 0, .s1 = 7, .s2 = 10 }, "or s0, s1, s2", .{ .s0 = 15, .s1 = 7, .s2 = 10 });
+    try checkInstr(.{ .s0 = 0, .s1 = 7, .s2 = 10 }, "xor s0, s1, s2", .{ .s0 = 13, .s1 = 7, .s2 = 10 });
+    try checkInstr(.{ .s0 = 0, .s1 = 7, .s2 = 0xFFFF_FFFF }, "xor s0, s1, s2", .{ .s0 = @as(u32, @bitCast(@as(i32, -8))), .s1 = 7, .s2 = 0xFFFF_FFFF });
+}
+
+test "sll, srl, sra" {
+    try checkInstr(.{ .s0 = 7, .s1 = 4 }, "sll s2, s0, s1", .{ .s0 = 7, .s1 = 4, .s2 = 112 });
+    try checkInstr(.{ .s0 = 7, .s1 = 30 }, "sll s2, s0, s1", .{ .s0 = 7, .s1 = 30, .s2 = 0xC000_0000 });
+    try checkInstr(.{ .s0 = 0xC000_0000, .s1 = 30 }, "srl s2, s0, s1", .{ .s0 = 0xC000_0000, .s1 = 30, .s2 = 3 });
+    try checkInstr(.{ .s0 = 0xC000_0000, .s1 = 30 }, "sra s2, s0, s1", .{ .s0 = 0xC000_0000, .s1 = 30, .s2 = 0xFFFF_FFFF });
+}
+
