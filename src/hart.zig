@@ -294,7 +294,9 @@ pub const Hart = struct {
                     @intFromEnum(riscv.Opcode.OP_IMM) => {
                         executeOpImm(self, buf);
                     },
-                    @intFromEnum(riscv.Opcode.JALR) => {},
+                    @intFromEnum(riscv.Opcode.JALR) => {
+                        executeJalr(self, buf);
+                    },
                     @intFromEnum(riscv.Opcode.SYSTEM) => {},
                     else => {},
                 }
@@ -431,7 +433,13 @@ pub const Hart = struct {
 
     fn executeJal(self: *@This(), buf: *ExecuteBuffer) void {
         buf.res = self.pc -% 12 +% 4;
-        self.next_pc = self.pc -% 12 + riscv.getJImmediate(buf.instruction);
+        self.next_pc = self.pc -% 12 +% riscv.getJImmediate(buf.instruction);
+        self.flush = 4;
+    }
+
+    fn executeJalr(self: *@This(), buf: *ExecuteBuffer) void {
+        buf.res = self.pc -% 12 +% 4;
+        self.next_pc = riscv.getIImmediate(buf.instruction) +% buf.op1;
         self.flush = 4;
     }
 

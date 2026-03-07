@@ -256,6 +256,9 @@ const instructions = .{
     .snez = .{ .func = assembleRType, .opcode = Opcode.OP, .funct3 = Funct3.OP.sltu, .funct7 = 0, .rs1 = 0 },
     .jal = .{ .func = assembleJType, .opcode = Opcode.JAL },
     .j = .{ .func = assembleJType, .opcode = Opcode.JAL, .rd = 0 },
+    .jalr = .{ .func = assembleIType, .opcode = Opcode.JALR, .funct3 = 0 },
+    .jr = .{ .func = assembleIType, .opcode = Opcode.JALR, .funct3 = 0, .rd = 0 },
+    .ret = .{ .func = assembleIType, .opcode = Opcode.JALR, .funct3 = 0, .rd = 0, .rs1 = 1, .imm = 0 },
 };
 
 fn parseRegister(comptime name: []const u8) u5 {
@@ -269,8 +272,8 @@ fn parseRegister(comptime name: []const u8) u5 {
 }
 
 fn assembleIType(comptime args: *std.mem.TokenIterator(u8, .any), comptime info: anytype) u32 {
-    const rd = parseRegister(args.next() orelse unreachable);
-    const rs1 = parseRegister(args.next() orelse unreachable);
+    const rd = if (@hasField(@TypeOf(info), "rd")) info.rd else parseRegister(args.next() orelse unreachable);
+    const rs1 = if (@hasField(@TypeOf(info), "rs1")) info.rs1 else parseRegister(args.next() orelse unreachable);
     const imm = comptime a: {
         if (@hasField(@TypeOf(info), "imm")) {
             break :a info.imm;

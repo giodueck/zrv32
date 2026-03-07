@@ -223,3 +223,9 @@ test "jal, j" {
     try checkInstr(.{ .x1 = 0 }, "j 0", .{ .x1 = 0, .pc = 4104 });
     try checkInstr(.{ .x1 = 0 }, "jal x1, 0", .{ .x1 = 4100, .pc = 4104 });
 }
+
+test "jalr, jr, ret" {
+    try checkInstr(.{ .x1 = 4096 }, "jr x1, 16", .{ .x1 = 4096, .pc = 4120 });
+    try checkInstr(.{ .x1 = 4096 }, "jalr x2, x1, 0", .{ .x1 = 4096, .x2 = 4100, .pc = 4104 });
+    try checkInstr(.{ .x1 = 8192 - 8 }, "ret", .{ .x1 = 8192 - 8, .pc = 8192 });
+}
