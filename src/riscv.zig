@@ -116,6 +116,14 @@ pub const Funct3 = .{
         .@"or" = 0b110,
         .@"and"= 0b111,
     },
+    .BRANCH = .{
+        .beq  = 0b000,
+        .bne  = 0b001,
+        .blt  = 0b100,
+        .bge  = 0b101,
+        .bltu = 0b110,
+        .bgeu = 0b111,
+    },
 };
 
 // zig fmt: on
@@ -216,6 +224,16 @@ pub fn getJImmediate(instr: u32) u32 {
     return ret;
 }
 
+pub fn getBImmediate(instr: u32) u32 {
+    const decoded: BTypeInstruction = @bitCast(instr);
+    var ret: u32 = (@as(u32, decoded.imm0) << 1) + (@as(u32, decoded.imm1) << 5) + (@as(u32, decoded.imm2) << 11) + (@as(u32, @as(u1, @bitCast(decoded.imm3))) << 12);
+    // Sign-extend
+    if (instr >> 31 == 1) {
+        ret |= @truncate(0xFFFF_FFFF << 13);
+    }
+    return ret;
+}
+
 // For testing
 
 pub fn assemble(comptime instr: []const u8) u32 {
@@ -259,6 +277,16 @@ const instructions = .{
     .jalr = .{ .func = assembleIType, .opcode = Opcode.JALR, .funct3 = 0 },
     .jr = .{ .func = assembleIType, .opcode = Opcode.JALR, .funct3 = 0, .rd = 0 },
     .ret = .{ .func = assembleIType, .opcode = Opcode.JALR, .funct3 = 0, .rd = 0, .rs1 = 1, .imm = 0 },
+    .beq = .{ .func = assembleBType, .opcode = Opcode.BRANCH, .funct3 = Funct3.BRANCH.beq },
+    .bne = .{ .func = assembleBType, .opcode = Opcode.BRANCH, .funct3 = Funct3.BRANCH.bne },
+    .blt = .{ .func = assembleBType, .opcode = Opcode.BRANCH, .funct3 = Funct3.BRANCH.blt },
+    .bgt = .{ .func = assembleBType, .opcode = Opcode.BRANCH, .funct3 = Funct3.BRANCH.blt, .invert = true },
+    .bge = .{ .func = assembleBType, .opcode = Opcode.BRANCH, .funct3 = Funct3.BRANCH.bge },
+    .ble = .{ .func = assembleBType, .opcode = Opcode.BRANCH, .funct3 = Funct3.BRANCH.bge, .invert = true },
+    .bltu = .{ .func = assembleBType, .opcode = Opcode.BRANCH, .funct3 = Funct3.BRANCH.bltu },
+    .bgtu = .{ .func = assembleBType, .opcode = Opcode.BRANCH, .funct3 = Funct3.BRANCH.bltu, .invert = true },
+    .bgeu = .{ .func = assembleBType, .opcode = Opcode.BRANCH, .funct3 = Funct3.BRANCH.bgeu },
+    .bleu = .{ .func = assembleBType, .opcode = Opcode.BRANCH, .funct3 = Funct3.BRANCH.bgeu, .invert = true },
 };
 
 fn parseRegister(comptime name: []const u8) u5 {
@@ -365,6 +393,31 @@ fn assembleJType(comptime args: *std.mem.TokenIterator(u8, .any), comptime info:
         .imm1 = @truncate(@as(u21, @bitCast(imm)) >> 11),
         .imm2 = @truncate(@as(u21, @bitCast(imm)) >> 12),
         .imm3 = @truncate(imm >> 20),
+    });
+}
+
+fn assembleBType(comptime args: *std.mem.TokenIterator(u8, .any), comptime info: anytype) u32 {
+    const rs1 = parseRegister(args.next() orelse unreachable);
+    const rs2 = parseRegister(args.next() orelse unreachable);
+    const imm = comptime a: {
+        if (@hasField(@TypeOf(info), "imm")) {
+            if (info.imm & 1 != 0) @compileError("Immediate must have 1 least-significant bit 0");
+            break :a info.imm;
+        }
+        const parsed = std.fmt.parseInt(i13, args.next() orelse unreachable, 10) catch unreachable;
+        if (parsed & 1 != 0) @compileError("Immediate must have 1 least-significant bit 0");
+        break :a parsed;
+    };
+    const invert = if (@hasField(@TypeOf(info), "invert") and info.invert) true else false;
+    return @bitCast(BTypeInstruction{
+        .opcode = @intFromEnum(info.opcode),
+        .rs1 = if (!invert) rs1 else rs2,
+        .rs2 = if (!invert) rs2 else rs1,
+        .funct3 = info.funct3,
+        .imm0 = @truncate(@as(u13, @bitCast(imm)) >> 1),
+        .imm1 = @truncate(@as(u13, @bitCast(imm)) >> 5),
+        .imm2 = @truncate(@as(u13, @bitCast(imm)) >> 11),
+        .imm3 = @truncate(imm >> 12),
     });
 }
 

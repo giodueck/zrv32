@@ -19,7 +19,9 @@
     - [x] mv
     - [x] seqz
     - [x] snez
-- [ ] Control transfer
+- [x] Control transfer
+    - [x] Unconditional jumps
+    - [x] Conditional branching
 - [ ] Load and Store
 - [ ] Memory ordering
 - [ ] Environment call and Breakpoints

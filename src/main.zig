@@ -225,7 +225,56 @@ test "jal, j" {
 }
 
 test "jalr, jr, ret" {
+    // Always accounting for the pipeline offset of 8 at the end
     try checkInstr(.{ .x1 = 4096 }, "jr x1, 16", .{ .x1 = 4096, .pc = 4120 });
     try checkInstr(.{ .x1 = 4096 }, "jalr x2, x1, 0", .{ .x1 = 4096, .x2 = 4100, .pc = 4104 });
     try checkInstr(.{ .x1 = 8192 - 8 }, "ret", .{ .x1 = 8192 - 8, .pc = 8192 });
+}
+
+test "beq, bne, blt, bge, bltu, bgeu, bgt, ble, bgtu, bleu" {
+    // Always accounting for the pipeline offset of 8 at the end or 6 total steps with 24
+    try checkInstr(.{ .s0 = 12, .s1 = 12 }, "beq s0, s1, 100", .{ .pc = 4204 });
+    try checkInstr(.{ .s0 = 12, .s1 = 13 }, "beq s0, s1, 100", .{ .pc = 4120 });
+    try checkInstr(.{ .s0 = 12, .s1 = 12 }, "bne s0, s1, 100", .{ .pc = 4120 });
+    try checkInstr(.{ .s0 = 12, .s1 = 13 }, "bne s0, s1, 100", .{ .pc = 4204 });
+
+    try checkInstr(.{ .s0 = 12, .s1 = 12 }, "blt s0, s1, 100", .{ .pc = 4120 });
+    try checkInstr(.{ .s0 = 12, .s1 = 13 }, "blt s0, s1, 100", .{ .pc = 4204 });
+    try checkInstr(.{ .s0 = 13, .s1 = 12 }, "blt s0, s1, 100", .{ .pc = 4120 });
+    try checkInstr(.{ .s0 = 13, .s1 = @as(u32, @bitCast(@as(i32, -15))) }, "blt s0, s1, 100", .{ .pc = 4120 });
+
+    try checkInstr(.{ .s0 = 12, .s1 = 12 }, "bge s0, s1, 100", .{ .pc = 4204 });
+    try checkInstr(.{ .s0 = 12, .s1 = 13 }, "bge s0, s1, 100", .{ .pc = 4120 });
+    try checkInstr(.{ .s0 = 13, .s1 = 12 }, "bge s0, s1, 100", .{ .pc = 4204 });
+    try checkInstr(.{ .s0 = 13, .s1 = @as(u32, @bitCast(@as(i32, -15))) }, "bge s0, s1, 100", .{ .pc = 4204 });
+
+    try checkInstr(.{ .s0 = 12, .s1 = 12 }, "bltu s0, s1, 100", .{ .pc = 4120 });
+    try checkInstr(.{ .s0 = 12, .s1 = 13 }, "bltu s0, s1, 100", .{ .pc = 4204 });
+    try checkInstr(.{ .s0 = 13, .s1 = 12 }, "bltu s0, s1, 100", .{ .pc = 4120 });
+    try checkInstr(.{ .s0 = 13, .s1 = @as(u32, @bitCast(@as(i32, -15))) }, "bltu s0, s1, 100", .{ .pc = 4204 });
+
+    try checkInstr(.{ .s0 = 12, .s1 = 12 }, "bgeu s0, s1, 100", .{ .pc = 4204 });
+    try checkInstr(.{ .s0 = 12, .s1 = 13 }, "bgeu s0, s1, 100", .{ .pc = 4120 });
+    try checkInstr(.{ .s0 = 13, .s1 = 12 }, "bgeu s0, s1, 100", .{ .pc = 4204 });
+    try checkInstr(.{ .s0 = 13, .s1 = @as(u32, @bitCast(@as(i32, -15))) }, "bgeu s0, s1, 100", .{ .pc = 4120 });
+
+    try checkInstr(.{ .s0 = 12, .s1 = 12 }, "bgt s0, s1, 100", .{ .pc = 4120 });
+    try checkInstr(.{ .s0 = 12, .s1 = 13 }, "bgt s0, s1, 100", .{ .pc = 4120 });
+    try checkInstr(.{ .s0 = 13, .s1 = 12 }, "bgt s0, s1, 100", .{ .pc = 4204 });
+    try checkInstr(.{ .s0 = 13, .s1 = @as(u32, @bitCast(@as(i32, -15))) }, "bgt s0, s1, 100", .{ .pc = 4204 });
+
+    try checkInstr(.{ .s0 = 12, .s1 = 12 }, "ble s0, s1, 100", .{ .pc = 4204 });
+    try checkInstr(.{ .s0 = 12, .s1 = 13 }, "ble s0, s1, 100", .{ .pc = 4204 });
+    try checkInstr(.{ .s0 = 13, .s1 = 12 }, "ble s0, s1, 100", .{ .pc = 4120 });
+    try checkInstr(.{ .s0 = 13, .s1 = @as(u32, @bitCast(@as(i32, -15))) }, "ble s0, s1, 100", .{ .pc = 4120 });
+
+    try checkInstr(.{ .s0 = 12, .s1 = 12 }, "bgtu s0, s1, 100", .{ .pc = 4120 });
+    try checkInstr(.{ .s0 = 12, .s1 = 13 }, "bgtu s0, s1, 100", .{ .pc = 4120 });
+    try checkInstr(.{ .s0 = 13, .s1 = 12 }, "bgtu s0, s1, 100", .{ .pc = 4204 });
+    try checkInstr(.{ .s0 = 13, .s1 = @as(u32, @bitCast(@as(i32, -15))) }, "bgtu s0, s1, 100", .{ .pc = 4120 });
+
+    try checkInstr(.{ .s0 = 12, .s1 = 12 }, "bleu s0, s1, 100", .{ .pc = 4204 });
+    try checkInstr(.{ .s0 = 12, .s1 = 13 }, "bleu s0, s1, 100", .{ .pc = 4204 });
+    try checkInstr(.{ .s0 = 13, .s1 = 12 }, "bleu s0, s1, 100", .{ .pc = 4120 });
+    try checkInstr(.{ .s0 = 13, .s1 = @as(u32, @bitCast(@as(i32, -15))) }, "bleu s0, s1, 100", .{ .pc = 4204 });
 }

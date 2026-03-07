@@ -302,7 +302,14 @@ pub const Hart = struct {
                 }
             },
             .S => {},
-            .B => {},
+            .B => |value| {
+                switch (value.opcode) {
+                    @intFromEnum(riscv.Opcode.BRANCH) => {
+                        executeBranch(self, buf);
+                    },
+                    else => {},
+                }
+            },
             .U => |value| {
                 switch (value.opcode) {
                     @intFromEnum(riscv.Opcode.LUI) => {
@@ -441,6 +448,35 @@ pub const Hart = struct {
         buf.res = self.pc -% 12 +% 4;
         self.next_pc = riscv.getIImmediate(buf.instruction) +% buf.op1;
         self.flush = 4;
+    }
+
+    fn executeBranch(self: *@This(), buf: *ExecuteBuffer) void {
+        const dest = self.pc -% 12 +% riscv.getBImmediate(buf.instruction);
+        switch (buf.decoded.B.funct3) {
+            riscv.Funct3.BRANCH.beq => {
+                if (buf.op1 == buf.op2) self.next_pc = dest;
+            },
+            riscv.Funct3.BRANCH.bne => {
+                if (buf.op1 != buf.op2) self.next_pc = dest;
+            },
+            riscv.Funct3.BRANCH.blt => {
+                const rs1: i32 = @bitCast(buf.op1);
+                const rs2: i32 = @bitCast(buf.op2);
+                if (rs1 < rs2) self.next_pc = dest;
+            },
+            riscv.Funct3.BRANCH.bge => {
+                const rs1: i32 = @bitCast(buf.op1);
+                const rs2: i32 = @bitCast(buf.op2);
+                if (rs1 >= rs2) self.next_pc = dest;
+            },
+            riscv.Funct3.BRANCH.bltu => {
+                if (buf.op1 < buf.op2) self.next_pc = dest;
+            },
+            riscv.Funct3.BRANCH.bgeu => {
+                if (buf.op1 >= buf.op2) self.next_pc = dest;
+            },
+            else => {}, // TODO handle illegal instructions
+        }
     }
 
     /// Executes memory access operations like LOAD and STORE
