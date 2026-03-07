@@ -307,10 +307,17 @@ pub const Hart = struct {
                 const imm = riscv.getIImmediate(buf.instruction);
                 buf.res = if (rs1 < imm) 1 else 0;
             },
-            // TODO finish other funct3
-            else => {
-                // TODO handle illegal instructions
+            riscv.Funct3.OP_IMM.andi => {
+                buf.res = buf.op1 & riscv.getIImmediate(buf.instruction);
             },
+            riscv.Funct3.OP_IMM.ori => {
+                buf.res = buf.op1 | riscv.getIImmediate(buf.instruction);
+            },
+            riscv.Funct3.OP_IMM.xori => {
+                buf.res = buf.op1 ^ riscv.getIImmediate(buf.instruction);
+            },
+            // TODO finish
+            else => {},
         }
     }
 
@@ -324,10 +331,18 @@ pub const Hart = struct {
     fn writeback(self: *@This(), buf: *MemoryAccessBuffer) void {
         var rd: u5 = 0;
         switch (buf.decoded) {
-            .R => |value| {rd = value.rd;},
-            .I => |value| {rd = value.rd;},
-            .U => |value| {rd = value.rd;},
-            .J => |value| {rd = value.rd;},
+            .R => |value| {
+                rd = value.rd;
+            },
+            .I => |value| {
+                rd = value.rd;
+            },
+            .U => |value| {
+                rd = value.rd;
+            },
+            .J => |value| {
+                rd = value.rd;
+            },
             else => {},
         }
         if (rd != 0) {

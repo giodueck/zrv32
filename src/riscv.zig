@@ -206,6 +206,10 @@ const instructions = .{
     .slti = .{ .func = assembleIType, .opcode = Opcode.OP_IMM, .funct3 = Funct3.OP_IMM.slti },
     .sltiu = .{ .func = assembleIType, .opcode = Opcode.OP_IMM, .funct3 = Funct3.OP_IMM.sltiu },
     .seqz = .{ .func = assembleIType, .opcode = Opcode.OP_IMM, .funct3 = Funct3.OP_IMM.sltiu, .imm = 1 },
+    .andi = .{ .func = assembleIType, .opcode = Opcode.OP_IMM, .funct3 = Funct3.OP_IMM.andi },
+    .ori = .{ .func = assembleIType, .opcode = Opcode.OP_IMM, .funct3 = Funct3.OP_IMM.ori },
+    .xori = .{ .func = assembleIType, .opcode = Opcode.OP_IMM, .funct3 = Funct3.OP_IMM.xori },
+    .not = .{ .func = assembleIType, .opcode = Opcode.OP_IMM, .funct3 = Funct3.OP_IMM.xori, .imm = -1 },
 };
 
 fn parseRegister(comptime name: []const u8) u5 {
