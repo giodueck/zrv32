@@ -210,6 +210,9 @@ const instructions = .{
     .ori = .{ .func = assembleIType, .opcode = Opcode.OP_IMM, .funct3 = Funct3.OP_IMM.ori },
     .xori = .{ .func = assembleIType, .opcode = Opcode.OP_IMM, .funct3 = Funct3.OP_IMM.xori },
     .not = .{ .func = assembleIType, .opcode = Opcode.OP_IMM, .funct3 = Funct3.OP_IMM.xori, .imm = -1 },
+    .slli = .{ .func = assembleITypeShift, .opcode = Opcode.OP_IMM, .funct3 = Funct3.OP_IMM.slli },
+    .srli = .{ .func = assembleITypeShift, .opcode = Opcode.OP_IMM, .funct3 = Funct3.OP_IMM.srli },
+    .srai = .{ .func = assembleITypeShift, .opcode = Opcode.OP_IMM, .funct3 = Funct3.OP_IMM.srai, .arithmetic = true },
 };
 
 fn parseRegister(comptime name: []const u8) u5 {
@@ -239,6 +242,27 @@ fn assembleIType(comptime args: *std.mem.TokenIterator(u8, .any), comptime info:
         .funct3 = info.funct3,
         .rs1 = rs1,
         .imm = imm,
+    });
+}
+
+fn assembleITypeShift(comptime args: *std.mem.TokenIterator(u8, .any), comptime info: anytype) u32 {
+    const rd = parseRegister(args.next() orelse unreachable);
+    const rs1 = parseRegister(args.next() orelse unreachable);
+    const imm = comptime a: {
+        if (@hasField(@TypeOf(info), "imm")) {
+            break :a info.imm;
+        }
+        break :a std.fmt.parseInt(u5, args.next() orelse unreachable, 10) catch unreachable;
+    };
+    const imm_upper: u12 = if (@hasField(@TypeOf(info), "arithmetic") and info.arithmetic) 0b0100000 else 0;
+    comptime std.debug.assert(args.next() == null);
+
+    return @bitCast(ITypeInstruction{
+        .opcode = @intFromEnum(info.opcode),
+        .rd = rd,
+        .funct3 = info.funct3,
+        .rs1 = rs1,
+        .imm = imm | (imm_upper << 5),
     });
 }
 

@@ -166,3 +166,10 @@ test "andi, ori, xori, not" {
     try checkInstr(.{ .x4 = 7 }, "xori x5, x4, 10", .{ .x4 = 7, .x5 = 13 });
     try checkInstr(.{ .x4 = 7 }, "not x5, x4", .{ .x4 = 7, .x5 = @as(u32, @bitCast(@as(i32, -8))) });
 }
+
+test "slli, srli, srai" {
+    try checkInstr(.{ .s0 = 7 }, "slli s1, s0, 4", .{ .s0 = 7, .s1 = 112 });
+    try checkInstr(.{ .s0 = 7 }, "slli s1, s0, 30", .{ .s0 = 7, .s1 = 0xC000_0000 });
+    try checkInstr(.{ .s0 = 0xC000_0000 }, "srli s1, s0, 30", .{ .s0 = 0xC000_0000, .s1 = 3 });
+    try checkInstr(.{ .s0 = 0xC000_0000 }, "srai s1, s0, 30", .{ .s0 = 0xC000_0000, .s1 = 0xFFFF_FFFF });
+}

@@ -316,8 +316,22 @@ pub const Hart = struct {
             riscv.Funct3.OP_IMM.xori => {
                 buf.res = buf.op1 ^ riscv.getIImmediate(buf.instruction);
             },
-            // TODO finish
-            else => {},
+            riscv.Funct3.OP_IMM.slli => {
+                buf.res = std.math.shl(u32, buf.op1, decoded.imm & 0x1F);
+            },
+            riscv.Funct3.OP_IMM.srli => {
+                if (decoded.imm >> 5 == 0b0100000) {
+                    // arithmetic
+                    buf.res = std.math.shr(u32, buf.op1, decoded.imm & 0x1F);
+                    if (buf.op1 >> 31 == 1) {
+                        buf.res |= std.math.shl(u32, 0xFFFF_FFFF, 32 - (decoded.imm & 0x1F));
+                    }
+                } else if (decoded.imm >> 5 == 0) {
+                    // logical
+                    buf.res = std.math.shr(u32, buf.op1, decoded.imm & 0x1F);
+                }
+                // TODO handle illegal instructions
+            },
         }
     }
 
