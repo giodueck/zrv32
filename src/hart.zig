@@ -47,6 +47,7 @@ pub const Hart = struct {
     registers: [32]u32 = [_]u32{0} ** 32,
     pc: u32 = 0,
     next_pc: u32 = 0,
+    flush: u32 = 0,
 
     fetch_buf: FetchBuffer = .{},
     decode_buf: DecodeBuffer = .{},
@@ -237,6 +238,7 @@ pub const Hart = struct {
         self.fetch_buf.instruction = self.bus.fetch(self.pc);
 
         self.pc = self.next_pc;
+        self.flush -|= 1;
     }
 
     /// Reads the needed registers into the Read Registers step buffer.
@@ -266,6 +268,14 @@ pub const Hart = struct {
 
     /// Executes the instruction
     fn execute(self: *@This(), buf: *ExecuteBuffer) void {
+        // After a branch or jump, the pipeline must be flushed, which invalidates instructions in the pipeline
+        // that were not meant to be executed.
+        if (self.flush > 0) {
+            buf.instruction = 19; // This is the cannonical NOP
+            buf.decoded = .{ .I = @bitCast(buf.instruction) };
+            return;
+        }
+
         buf.res = 0;
         // TODO finish
         switch (buf.decoded) {
@@ -274,7 +284,7 @@ pub const Hart = struct {
                     @intFromEnum(riscv.Opcode.OP) => {
                         executeOp(self, buf);
                     },
-                    else => {}, // TODO handle unimplemented or illegal instructions
+                    else => {},
                 }
             },
             .I => |value| {
@@ -286,7 +296,7 @@ pub const Hart = struct {
                     },
                     @intFromEnum(riscv.Opcode.JALR) => {},
                     @intFromEnum(riscv.Opcode.SYSTEM) => {},
-                    else => {}, // TODO handle unimplemented or illegal instructions
+                    else => {},
                 }
             },
             .S => {},
@@ -299,11 +309,18 @@ pub const Hart = struct {
                     @intFromEnum(riscv.Opcode.AUIPC) => {
                         executeAuipc(self, buf);
                     },
-                    else => {}, // TODO handle unimplemented or illegal instructions
+                    else => {},
                 }
             },
-            .J => {},
-            else => {},
+            .J => |value| {
+                switch (value.opcode) {
+                    @intFromEnum(riscv.Opcode.JAL) => {
+                        executeJal(self, buf);
+                    },
+                    else => {},
+                }
+            },
+            else => {}, // TODO handle unimplemented or illegal instructions
         }
     }
 
@@ -410,6 +427,12 @@ pub const Hart = struct {
                 // TODO handle illegal instructions
             },
         }
+    }
+
+    fn executeJal(self: *@This(), buf: *ExecuteBuffer) void {
+        buf.res = self.pc -% 12 +% 4;
+        self.next_pc = self.pc -% 12 + riscv.getJImmediate(buf.instruction);
+        self.flush = 4;
     }
 
     /// Executes memory access operations like LOAD and STORE

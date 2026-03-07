@@ -205,6 +205,17 @@ pub inline fn getUImmediate(instr: u32) u32 {
     return instr & 0xFFFF_F000;
 }
 
+/// Returns the J-Immediate generated from the instruction.
+pub fn getJImmediate(instr: u32) u32 {
+    const decoded: JTypeInstruction = @bitCast(instr);
+    var ret: u32 = (@as(u32, decoded.imm0) << 1) + (@as(u32, decoded.imm1) << 11) + (@as(u32, decoded.imm2) << 12) + (@as(u32, @as(u1, @bitCast(decoded.imm3))) << 20);
+    // Sign-extend
+    if (instr >> 31 == 1) {
+        ret |= @truncate(0xFFFF_FFFF << 21);
+    }
+    return ret;
+}
+
 // For testing
 
 pub fn assemble(comptime instr: []const u8) u32 {
@@ -243,6 +254,8 @@ const instructions = .{
     .srl = .{ .func = assembleRType, .opcode = Opcode.OP, .funct3 = Funct3.OP.srl, .funct7 = 0 },
     .sra = .{ .func = assembleRType, .opcode = Opcode.OP, .funct3 = Funct3.OP.srl, .funct7 = 32 },
     .snez = .{ .func = assembleRType, .opcode = Opcode.OP, .funct3 = Funct3.OP.sltu, .funct7 = 0, .rs1 = 0 },
+    .jal = .{ .func = assembleJType, .opcode = Opcode.JAL },
+    .j = .{ .func = assembleJType, .opcode = Opcode.JAL, .rd = 0 },
 };
 
 fn parseRegister(comptime name: []const u8) u5 {
@@ -327,6 +340,28 @@ fn assembleRType(comptime args: *std.mem.TokenIterator(u8, .any), comptime info:
         .rs2 = rs2,
         .funct3 = info.funct3,
         .funct7 = info.funct7,
+    });
+}
+
+fn assembleJType(comptime args: *std.mem.TokenIterator(u8, .any), comptime info: anytype) u32 {
+    const rd = if (@hasField(@TypeOf(info), "rd")) info.rd else parseRegister(args.next() orelse unreachable);
+    const imm = comptime a: {
+        if (@hasField(@TypeOf(info), "imm")) {
+            if (info.imm & 1 != 0) @compileError("Immediate must have 1 least-significant bit 0");
+            break :a info.imm;
+        }
+        const parsed = std.fmt.parseInt(i21, args.next() orelse unreachable, 10) catch unreachable;
+        if (parsed & 1 != 0) @compileError("Immediate must have 1 least-significant bit 0");
+        break :a parsed;
+    };
+
+    return @bitCast(JTypeInstruction{
+        .opcode = @intFromEnum(info.opcode),
+        .rd = rd,
+        .imm0 = @truncate(@as(u21, @bitCast(imm)) >> 1),
+        .imm1 = @truncate(@as(u21, @bitCast(imm)) >> 11),
+        .imm2 = @truncate(@as(u21, @bitCast(imm)) >> 12),
+        .imm3 = @truncate(imm >> 20),
     });
 }
 

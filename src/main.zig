@@ -217,3 +217,9 @@ test "sll, srl, sra" {
     try checkInstr(.{ .s0 = 0xC000_0000, .s1 = 30 }, "sra s2, s0, s1", .{ .s0 = 0xC000_0000, .s1 = 30, .s2 = 0xFFFF_FFFF });
 }
 
+test "jal, j" {
+    // This instruction is loaded at 4096, jumps to itself, and accounting for the 2 subsequent pipeline steps,
+    // pc ends up at 4096 + 8 = 4104
+    try checkInstr(.{ .x1 = 0 }, "j 0", .{ .x1 = 0, .pc = 4104 });
+    try checkInstr(.{ .x1 = 0 }, "jal x1, 0", .{ .x1 = 4100, .pc = 4104 });
+}
