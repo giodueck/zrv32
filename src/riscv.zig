@@ -201,6 +201,11 @@ pub fn assemble(comptime instr: []const u8) u32 {
 /// Lookup table to determine how to interpret/assemble each instruction (for test assembly like "addi x1,x0,42"
 const instructions = .{
     .addi = .{ .func = assembleIType, .opcode = Opcode.OP_IMM, .funct3 = Funct3.OP_IMM.addi },
+    .mv = .{ .func = assembleIType, .opcode = Opcode.OP_IMM, .funct3 = Funct3.OP_IMM.addi, .imm = 0 },
+    .nop = .{ .func = pack, .unpacked = ITypeInstruction{ .opcode = @intFromEnum(Opcode.OP_IMM), .funct3 = Funct3.OP_IMM.addi, .rd = 0, .rs1 = 0, .imm = 0 } },
+    .slti = .{ .func = assembleIType, .opcode = Opcode.OP_IMM, .funct3 = Funct3.OP_IMM.slti },
+    .sltiu = .{ .func = assembleIType, .opcode = Opcode.OP_IMM, .funct3 = Funct3.OP_IMM.sltiu },
+    .seqz = .{ .func = assembleIType, .opcode = Opcode.OP_IMM, .funct3 = Funct3.OP_IMM.sltiu, .imm = 1 },
 };
 
 fn parseRegister(comptime name: []const u8) u5 {
@@ -231,4 +236,10 @@ fn assembleIType(comptime args: *std.mem.TokenIterator(u8, .any), comptime info:
         .rs1 = rs1,
         .imm = imm,
     });
+}
+
+fn pack(comptime args: *std.mem.TokenIterator(u8, .any), comptime info: anytype) u32 {
+    // Don't want to have a nop with arguments!
+    comptime std.debug.assert(args.next() == null);
+    return @bitCast(info.unpacked);
 }

@@ -152,6 +152,28 @@ pub const Hart = struct {
         }
     }
 
+    /// Load a slice of encoded instructions, flush the pipeline, then step through until every pipeline step
+    /// ran the program
+    pub fn execMany(self: *@This(), program: []u32) void {
+        self.fetch_buf = FetchBuffer{};
+        self.decode_buf = DecodeBuffer{};
+        self.read_registers_buf = ReadRegistersBuffer{};
+        self.execute_buf = ExecuteBuffer{};
+        self.memory_access_buf = MemoryAccessBuffer{};
+
+        self.loadROM(program);
+        self.pc = self.bus.boot_rom_start;
+
+        // Pipeline overhead
+        inline for (0..5) |_| {
+            self.step();
+        }
+
+        for (program) |_| {
+            self.step();
+        }
+    }
+
     // Emulation methods
 
     /// Loads the program ROM. Fails silently, TODO don't
@@ -273,7 +295,17 @@ pub const Hart = struct {
         const decoded: riscv.ITypeInstruction = @bitCast(buf.instruction);
         switch (decoded.funct3) {
             riscv.Funct3.OP_IMM.addi => {
-                buf.res = buf.op1 + riscv.getIImmediate(buf.instruction);
+                buf.res = buf.op1 +% riscv.getIImmediate(buf.instruction);
+            },
+            riscv.Funct3.OP_IMM.slti => {
+                const rs1: i32 = @bitCast(buf.op1);
+                const imm: i32 = @bitCast(riscv.getIImmediate(buf.instruction));
+                buf.res = if (rs1 < imm) 1 else 0;
+            },
+            riscv.Funct3.OP_IMM.sltiu => {
+                const rs1 = buf.op1;
+                const imm = riscv.getIImmediate(buf.instruction);
+                buf.res = if (rs1 < imm) 1 else 0;
             },
             // TODO finish other funct3
             else => {
