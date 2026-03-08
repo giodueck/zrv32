@@ -91,6 +91,7 @@ pub fn main() !u8 {
 }
 
 const expect = std.testing.expect;
+const expectEqual = std.testing.expectEqual;
 
 test "setState" {
     var hart = Hart{};
@@ -295,60 +296,12 @@ test "lw, lh, lb, lhu, lbu" {
 test "sw, sh, sb" {
     const program = [_]u32{
         riscv.assemble("lui s0, 305418240"), // 0x12345000
-        riscv.assemble("nop"),
-        riscv.assemble("nop"),
-        riscv.assemble("nop"),
-        riscv.assemble("nop"),
-        riscv.assemble("nop"),
-        riscv.assemble("nop"),
-        riscv.assemble("nop"),
         riscv.assemble("addi s0, s0, 1656"), // 0x678
-        riscv.assemble("nop"),
-        riscv.assemble("nop"),
-        riscv.assemble("nop"),
-        riscv.assemble("nop"),
-        riscv.assemble("nop"),
-        riscv.assemble("nop"),
-        riscv.assemble("nop"),
-        riscv.assemble("nop"),
-        riscv.assemble("nop"),
         riscv.assemble("lui a0, 262144"), // ram start: 256K
-        riscv.assemble("nop"),
-        riscv.assemble("nop"),
-        riscv.assemble("nop"),
-        riscv.assemble("nop"),
-        riscv.assemble("nop"),
-        riscv.assemble("nop"),
-        riscv.assemble("nop"),
-        riscv.assemble("nop"),
-        riscv.assemble("nop"),
-        riscv.assemble("nop"),
         riscv.assemble("sw a0, s0, 0"),
-        riscv.assemble("nop"),
-        riscv.assemble("nop"),
-        riscv.assemble("nop"),
-        riscv.assemble("nop"),
-        riscv.assemble("nop"),
-        riscv.assemble("nop"),
-        riscv.assemble("nop"),
         riscv.assemble("sh a0, s0, 4"),
-        riscv.assemble("nop"),
-        riscv.assemble("nop"),
-        riscv.assemble("nop"),
-        riscv.assemble("nop"),
-        riscv.assemble("nop"),
-        riscv.assemble("nop"),
-        riscv.assemble("nop"),
         riscv.assemble("sb a0, s0, 8"),
-        riscv.assemble("nop"),
-        riscv.assemble("nop"),
-        riscv.assemble("nop"),
-        riscv.assemble("nop"),
-        riscv.assemble("nop"),
-        riscv.assemble("nop"),
-        riscv.assemble("nop"),
     };
-    // TODO fix pipeline hazards
 
     var hart: Hart = .{};
     try hart.init(std.testing.allocator);
@@ -356,7 +309,7 @@ test "sw, sh, sb" {
 
     hart.execMany(&program);
 
-    try expect(hart.bus.get(hart.bus.ram_start, 4) == 0x12345678);
-    try expect(hart.bus.get(hart.bus.ram_start + 4, 2) == 0x5678);
-    try expect(hart.bus.get(hart.bus.ram_start + 8, 1) == 0x78);
+    try expectEqual(hart.bus.get(hart.bus.ram_start, 4), 0x12345678);
+    try expectEqual(hart.bus.get(hart.bus.ram_start + 4, 2), 0x5678);
+    try expectEqual(hart.bus.get(hart.bus.ram_start + 8, 1), 0x78);
 }

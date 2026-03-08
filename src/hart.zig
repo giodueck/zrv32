@@ -21,6 +21,7 @@ const ReadRegistersBuffer = struct {
     decoded: riscv.InstructionUnion = .{ .none = @as(void, undefined) },
     op1: u32 = 0,
     op2: u32 = 0,
+    rd: u5 = 0,
 };
 
 /// Keeps the result of the last Execute operation
@@ -30,15 +31,10 @@ const ExecuteBuffer = struct {
     op1: u32 = 0,
     op2: u32 = 0,
     res: u32 = 0,
-};
-
-/// Keeps the result of the last Memory Access operation
-const MemoryAccessBuffer = struct {
-    instruction: u32 = 0,
-    decoded: riscv.InstructionUnion = .{ .none = @as(void, undefined) },
-    op1: u32 = 0,
-    op2: u32 = 0,
-    res: u32 = 0,
+    addr: u32 = 0,
+    rd: u5 = 0,
+    fw_rd: u5 = 0,
+    fw_res: u32 = 0,
 };
 
 // Writeback does not need to pass information to any other stage, so it doesn't get a buffer
@@ -53,7 +49,6 @@ pub const Hart = struct {
     decode_buf: DecodeBuffer = .{},
     read_registers_buf: ReadRegistersBuffer = .{},
     execute_buf: ExecuteBuffer = .{},
-    memory_access_buf: MemoryAccessBuffer = .{},
 
     bus: bus.Bus = .{},
 
@@ -143,7 +138,6 @@ pub const Hart = struct {
         self.decode_buf = DecodeBuffer{};
         self.read_registers_buf = ReadRegistersBuffer{};
         self.execute_buf = ExecuteBuffer{};
-        self.memory_access_buf = MemoryAccessBuffer{};
 
         self.bus.set(self.bus.boot_rom_start, instr, 4);
         self.pc = self.bus.boot_rom_start;
@@ -160,7 +154,6 @@ pub const Hart = struct {
         self.decode_buf = DecodeBuffer{};
         self.read_registers_buf = ReadRegistersBuffer{};
         self.execute_buf = ExecuteBuffer{};
-        self.memory_access_buf = MemoryAccessBuffer{};
 
         self.loadROM(program);
         self.pc = self.bus.boot_rom_start;
@@ -196,24 +189,19 @@ pub const Hart = struct {
         // Pipeline detail: writeback needs to finish before reading registers begins.
         // Since we want to use all buffers before writing to them, we do them in reverse order anyways
 
-        // 6. Writeback
-        self.writeback(&self.memory_access_buf);
+        // 5. Writeback
+        self.writeback(&self.execute_buf);
 
-        // 5. Memory access
-        self.memory_access_buf.instruction = self.execute_buf.instruction;
-        self.memory_access_buf.instruction = self.execute_buf.instruction;
-        self.memory_access_buf.decoded = self.execute_buf.decoded;
-        self.memory_access_buf.op1 = self.execute_buf.op1;
-        self.memory_access_buf.op2 = self.execute_buf.op2;
-        self.memory_access_buf.res = self.execute_buf.res;
-        self.memoryAccess(&self.memory_access_buf);
-
-        // 4. Execute
+        // 4. Execute and Memory access
         self.execute_buf.instruction = self.read_registers_buf.instruction;
         self.execute_buf.decoded = self.read_registers_buf.decoded;
         self.execute_buf.op1 = self.read_registers_buf.op1;
         self.execute_buf.op2 = self.read_registers_buf.op2;
+        self.execute_buf.rd = self.read_registers_buf.rd;
         self.execute(&self.execute_buf);
+        //  pipeline forward for next execute
+        self.execute_buf.fw_res = self.execute_buf.res;
+        self.execute_buf.fw_rd = self.execute_buf.rd;
 
         // 3. Read registers
         self.read_registers_buf.instruction = self.decode_buf.instruction;
@@ -249,19 +237,28 @@ pub const Hart = struct {
             .R => |value| {
                 buf.op1 = self.registers[value.rs1];
                 buf.op2 = self.registers[value.rs2];
+                buf.rd = buf.decoded.R.rd;
             },
             .I => |value| {
                 buf.op1 = self.registers[value.rs1];
+                buf.rd = buf.decoded.I.rd;
             },
             .S => |value| {
                 buf.op1 = self.registers[value.rs1];
                 buf.op2 = self.registers[value.rs2];
+                buf.rd = 0;
             },
             .B => |value| {
                 buf.op1 = self.registers[value.rs1];
                 buf.op2 = self.registers[value.rs2];
+                buf.rd = 0;
             },
-            .U, .J => {},
+            .U => {
+                buf.rd = buf.decoded.U.rd;
+            },
+            .J => {
+                buf.rd = buf.decoded.J.rd;
+            },
             else => {},
         }
     }
@@ -274,6 +271,28 @@ pub const Hart = struct {
             buf.instruction = 19; // This is the cannonical NOP
             buf.decoded = .{ .I = @bitCast(buf.instruction) };
             return;
+        }
+
+        // Pipeline forward
+        if (buf.fw_rd != 0) {
+            switch (buf.decoded) {
+                .R => {
+                    if (buf.decoded.R.rs1 == buf.fw_rd) buf.op1 = buf.fw_res;
+                    if (buf.decoded.R.rs2 == buf.fw_rd) buf.op2 = buf.fw_res;
+                },
+                .I => {
+                    if (buf.decoded.I.rs1 == buf.fw_rd) buf.op1 = buf.fw_res;
+                },
+                .S => {
+                    if (buf.decoded.S.rs1 == buf.fw_rd) buf.op1 = buf.fw_res;
+                    if (buf.decoded.S.rs2 == buf.fw_rd) buf.op2 = buf.fw_res;
+                },
+                .B => {
+                    if (buf.decoded.B.rs1 == buf.fw_rd) buf.op1 = buf.fw_res;
+                    if (buf.decoded.B.rs2 == buf.fw_rd) buf.op2 = buf.fw_res;
+                },
+                .J, .U, .none => {},
+            }
         }
 
         buf.res = 0;
@@ -290,7 +309,7 @@ pub const Hart = struct {
             .I => |value| {
                 switch (value.opcode) {
                     @intFromEnum(riscv.Opcode.LOAD) => {
-                        executeLoad(self, buf);
+                        executeMemoryAccess(self, buf);
                     },
                     @intFromEnum(riscv.Opcode.MISC_MEM) => {},
                     @intFromEnum(riscv.Opcode.OP_IMM) => {
@@ -303,7 +322,14 @@ pub const Hart = struct {
                     else => {},
                 }
             },
-            .S => {},
+            .S => |value| {
+                switch (value.opcode) {
+                    @intFromEnum(riscv.Opcode.STORE) => {
+                        executeMemoryAccess(self, buf);
+                    },
+                    else => {},
+                }
+            },
             .B => |value| {
                 switch (value.opcode) {
                     @intFromEnum(riscv.Opcode.BRANCH) => {
@@ -331,7 +357,7 @@ pub const Hart = struct {
                     else => {},
                 }
             },
-            else => {}, // TODO handle unimplemented or illegal instructions
+            .none => {}, // TODO handle unimplemented or illegal instructions
         }
     }
 
@@ -481,20 +507,11 @@ pub const Hart = struct {
         }
     }
 
-    fn executeLoad(self: *@This(), buf: *ExecuteBuffer) void {
-        _ = self;
-        buf.addr = buf.op1 +% riscv.getIImmediate(buf.instruction);
-    }
-
-    fn executeStore(self: *@This(), buf: *ExecuteBuffer) void {
-        _ = self;
-        buf.addr = buf.op1 +% riscv.getSImmediate(buf.instruction);
-    }
-
     /// Executes memory access operations like LOAD and STORE
-    fn memoryAccess(self: *@This(), buf: *MemoryAccessBuffer) void {
+    fn executeMemoryAccess(self: *@This(), buf: *ExecuteBuffer) void {
         const decoded: riscv.ITypeInstruction = @bitCast(buf.instruction);
         if (decoded.opcode == @intFromEnum(riscv.Opcode.LOAD)) {
+            buf.addr = buf.op1 +% riscv.getIImmediate(buf.instruction);
             switch (buf.decoded.I.funct3) {
                 riscv.Funct3.LOAD.lb, riscv.Funct3.LOAD.lbu => |value| {
                     buf.res = self.bus.load(buf.addr, 1);
@@ -514,6 +531,7 @@ pub const Hart = struct {
                 else => {}, // TODO handle illegal width
             }
         } else if (decoded.opcode == @intFromEnum(riscv.Opcode.STORE)) {
+            buf.addr = buf.op1 +% riscv.getSImmediate(buf.instruction);
             switch (buf.decoded.S.funct3) {
                 riscv.Funct3.STORE.sb => {
                     self.bus.store(buf.addr, buf.op2, 1);
@@ -530,7 +548,7 @@ pub const Hart = struct {
     }
 
     /// Writes pipeline results to the register file
-    fn writeback(self: *@This(), buf: *MemoryAccessBuffer) void {
+    fn writeback(self: *@This(), buf: *ExecuteBuffer) void {
         var rd: u5 = 0;
         switch (buf.decoded) {
             .R => |value| {
