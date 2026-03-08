@@ -4,7 +4,7 @@ const Hart = @import("hart.zig").Hart;
 const riscv = @import("riscv.zig");
 
 pub fn main() !u8 {
-    var arena = std.heap.ArenaAllocator{ .child_allocator = std.heap.page_allocator, .state = .{} };
+    var arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
     defer arena.deinit();
     const allocator = arena.allocator();
 
@@ -18,11 +18,21 @@ pub fn main() !u8 {
             .id = 'h',
             .names = .{ .short = 'h', .long = "help" },
         },
+        .{
+            // positional: boot program
+            .id = 'b',
+            .takes_value = .one,
+        },
+        .{
+            // positional: main program
+            .id = 'p',
+            .takes_value = .one,
+        },
     };
 
     const usage_str =
         "Usage: zrv32 [-h|--help]\n" ++
-        "       zrv32 <binary executable>\n";
+        "       zrv32 <binary boot executable> <binary program executable>\n";
 
     const help_str = usage_str ++ "\n" ++
         "<binary executable> is an executable that contains purely Risc-V machine code.\n" ++
@@ -44,6 +54,11 @@ pub fn main() !u8 {
         .diagnostic = &diag,
     };
 
+    // Program binaries will be directly stored in the emulator memory
+    var hart: Hart = .{};
+    try hart.init(std.heap.page_allocator);
+    defer hart.deinit();
+
     // We use the streaming parser, so we consume each argument individually
     while (cla_parser.next() catch |err| {
         // Report useful error message and exit
@@ -60,16 +75,51 @@ pub fn main() !u8 {
                 try stderr.flush();
                 return 0;
             },
+            'b' => {
+                var fd = try std.fs.cwd().openFile(arg.value.?, .{ .mode = .read_only });
+                defer fd.close();
+                const buf = try allocator.alloc(u8, hart.bus.boot_rom_size);
+                defer allocator.free(buf);
+                var reader = fd.reader(buf);
+                if (try reader.getSize() > hart.bus.boot_rom_size) {
+                    try stderr.print("Boot binary \"{s}\" too large: {d} out of a maximum of {d}\n", .{arg.value.?, try reader.getSize(), hart.bus.boot_rom_size});
+                    return 1;
+                }
+                reader.interface.readSliceAll(buf) catch |e| {
+                    if (e != error.EndOfStream) return e;
+                };
+                hart.loadBootROMBytes(buf);
+            },
+            'x' => {
+                var fd = try std.fs.cwd().openFile(arg.value.?, .{ .mode = .read_only });
+                defer fd.close();
+                const buf = try allocator.alloc(u8, hart.bus.program_rom_size);
+                defer allocator.free(buf);
+                var reader = fd.reader(buf);
+                if (try reader.getSize() > hart.bus.program_rom_size) {
+                    try stderr.print("Program binary \"{s}\" too large: {d} out of a maximum of {d}\n", .{arg.value.?, try reader.getSize(), hart.bus.program_rom_size});
+                    return 1;
+                }
+                reader.interface.readSliceAll(buf) catch |e| {
+                    if (e != error.EndOfStream) return e;
+                };
+                hart.loadProgramROMBytes(buf);
+            },
             else => unreachable,
         }
     }
 
     // Free parser resources, but keep the reserved capacity
-    _ = arena.reset(.retain_capacity);
+    _ = arena.reset(.free_all);
 
     // Command-line argument parsing done
-    try stderr.print("Hello\n", .{});
-    try stderr.flush();
+
+    // Run emulator starting at boot binary until ebreak is hit
+    while (!hart.ebreak) {
+        hart.step();
+    }
+
+    hart.printState();
 
     // API needs:
     //  - Load program
@@ -108,7 +158,7 @@ test "memory access control fetch" {
     defer hart.deinit();
 
     // Boot ROM
-    hart.loadROM(&.{
+    hart.loadBootROM(&.{
         0b0010011, // NOP
         2,
         3,

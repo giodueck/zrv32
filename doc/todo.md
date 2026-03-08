@@ -25,6 +25,9 @@
 - [x] Load and Store
     - [x] lw, lh, lb, lhu, lbu
     - [x] sw, sh, sb
-- [ ] Memory ordering
+- [x] Memory ordering
+    this is just a NOP
 - [ ] Environment call and Breakpoints
+    - [x] ebreak
+    - [ ] system (just a NOP for now)
 

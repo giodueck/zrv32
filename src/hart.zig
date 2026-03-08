@@ -44,6 +44,7 @@ pub const Hart = struct {
     pc: u32 = 0,
     next_pc: u32 = 0,
     flush: u32 = 0,
+    ebreak: bool = false,
 
     fetch_buf: FetchBuffer = .{},
     decode_buf: DecodeBuffer = .{},
@@ -155,7 +156,7 @@ pub const Hart = struct {
         self.read_registers_buf = ReadRegistersBuffer{};
         self.execute_buf = ExecuteBuffer{};
 
-        self.loadROM(program);
+        self.loadBootROM(program);
         self.pc = self.bus.boot_rom_start;
 
         // Pipeline overhead
@@ -168,14 +169,57 @@ pub const Hart = struct {
         }
     }
 
-    // Emulation methods
-
-    /// Loads the program ROM. Fails silently, TODO don't
-    pub fn loadROM(self: *@This(), rom: []const u32) void {
+    /// Loads the boot ROM. Fails silently, TODO don't
+    pub fn loadBootROM(self: *@This(), rom: []const u32) void {
         for (rom, 0..) |word, i| {
             self.bus.set(self.bus.boot_rom_start + @as(u32, @intCast(i * 4)), word, 4);
         }
     }
+
+    /// Loads the program ROM. Fails silently, TODO don't
+    pub fn loadProgramROM(self: *@This(), rom: []const u32) void {
+        for (rom, 0..) |word, i| {
+            self.bus.set(self.bus.program_rom_start + @as(u32, @intCast(i * 4)), word, 4);
+        }
+    }
+
+    /// Loads the boot ROM. Fails silently, TODO don't
+    pub fn loadBootROMBytes(self: *@This(), rom: []const u8) void {
+        for (rom, 0..) |byte, i| {
+            self.bus.set(self.bus.boot_rom_start + @as(u32, @intCast(i)), byte, 1);
+        }
+    }
+
+    /// Loads the program ROM. Fails silently, TODO don't
+    pub fn loadProgramROMBytes(self: *@This(), rom: []const u8) void {
+        for (rom, 0..) |byte, i| {
+            self.bus.set(self.bus.program_rom_start + @as(u32, @intCast(i)), byte, 1);
+        }
+    }
+
+    /// Debugging method to print the current Hart state to stderr
+    pub fn printState(self: @This()) void {
+        std.debug.print("pc: {x} ({0d})\n", .{self.pc});
+        const register_names = comptime a: {
+            var names: [32][]const u8 = undefined;
+            for (@typeInfo(@TypeOf(riscv.RegisterNames)).@"struct".fields, 0..) |f, i| {
+                names[i] = f.name;
+            }
+            break :a names;
+        };
+        const register_aliases = comptime a: {
+            var names: [32][]const u8 = undefined;
+            for (@typeInfo(@TypeOf(riscv.RegisterAliases)).@"struct".fields, 0..) |f, i| {
+                names[i] = f.name;
+            }
+            break :a names;
+        };
+        for (0..16) |i| {
+            std.debug.print("{s: >4} ({s: >3}) 0x{x:08} | {s: >4} ({s: >3}) 0x{x:08}\n", .{ register_aliases[i * 2], register_names[i * 2], self.registers[i * 2], register_aliases[i * 2 + 1], register_names[i * 2 + 1], self.registers[i * 2 + 1] });
+        }
+    }
+
+    // Emulation methods
 
     /// Sets the register rn to the value val, then sets x0 to 0.
     fn setReg(self: *@This(), rn: u5, val: u32) void {
@@ -311,14 +355,20 @@ pub const Hart = struct {
                     @intFromEnum(riscv.Opcode.LOAD) => {
                         executeMemoryAccess(self, buf);
                     },
-                    @intFromEnum(riscv.Opcode.MISC_MEM) => {},
+                    @intFromEnum(riscv.Opcode.MISC_MEM) => {
+                        // Memory access is entirely sequential and we only have one core anyways,
+                        // so FENCE will be a NOP.
+                        // PAUSE is also a NOP.
+                    },
                     @intFromEnum(riscv.Opcode.OP_IMM) => {
                         executeOpImm(self, buf);
                     },
                     @intFromEnum(riscv.Opcode.JALR) => {
                         executeJalr(self, buf);
                     },
-                    @intFromEnum(riscv.Opcode.SYSTEM) => {},
+                    @intFromEnum(riscv.Opcode.SYSTEM) => {
+                        executeSystem(self, buf);
+                    },
                     else => {},
                 }
             },
@@ -545,6 +595,17 @@ pub const Hart = struct {
                 else => {}, // TODO handle illegal width
             }
         }
+    }
+
+    fn executeSystem(self: *@This(), buf: *ExecuteBuffer) void {
+        const decoded = buf.decoded.I;
+        if (decoded.imm == 0) {
+            // ECALL
+            // TODO
+        } else if (decoded.imm == 1) {
+            // EBREAK
+            self.ebreak = true;
+        } // TODO handle illegal values
     }
 
     /// Writes pipeline results to the register file
