@@ -374,18 +374,16 @@ fn assembleUType(comptime args: *std.mem.TokenIterator(u8, .any), comptime info:
     const rd = parseRegister(args.next() orelse unreachable);
     const imm = comptime a: {
         if (@hasField(@TypeOf(info), "imm")) {
-            if (info.imm & 0xFFF != 0) @compileError("Immediate must have 12 least-significant bits 0");
             break :a info.imm;
         }
-        const parsed = std.fmt.parseInt(i32, args.next() orelse unreachable, 10) catch unreachable;
-        if (parsed & 0xFFF != 0) @compileError("Immediate must have 12 least-significant bits 0");
+        const parsed = std.fmt.parseInt(i20, args.next() orelse unreachable, 10) catch unreachable;
         break :a parsed;
     };
 
     return @bitCast(UTypeInstruction{
         .opcode = @intFromEnum(info.opcode),
         .rd = rd,
-        .imm = @truncate(imm >> 12),
+        .imm = imm,
     });
 }
 

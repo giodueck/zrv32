@@ -245,10 +245,10 @@ test "slli, srli, srai" {
 test "lui, auipc" {
     // To construct a 32 bit immediate with LUI+ADDI we need to compensate for sign extension by adding 4096 to
     // the upper immediate. To construct 0x0bee_ffff, we use (0x0bee_f000 + 0x1000) and 0xfff
-    try checkInstr(.{ .s0 = 4095 }, "lui s0, 200212480", .{ .s0 = 0xbef0000 });
-    try checkInstr(.{ .s0 = 0xbef0000 }, "addi s0, s0, -1", .{ .s0 = 0xbeeffff });
+    try checkInstr(.{ .s0 = 4095 }, "lui s0, -266496", .{ .s0 = 0xbef00000 });
+    try checkInstr(.{ .s0 = 0xbef00000 }, "addi s0, s0, -1", .{ .s0 = 0xbeefffff });
     try checkInstr(.{ .s0 = 0 }, "auipc s0, 0", .{ .s0 = 4096 }); // boot ROM start
-    try checkInstr(.{ .s0 = 0 }, "auipc s0, 4096", .{ .s0 = 8192 }); // boot ROM start + offset
+    try checkInstr(.{ .s0 = 0 }, "auipc s0, 1", .{ .s0 = 8192 }); // boot ROM start + offset
 }
 
 test "add, sub" {
@@ -365,9 +365,9 @@ test "lw, lh, lb, lhu, lbu" {
 
 test "sw, sh, sb" {
     const program = [_]u32{
-        riscv.assemble("lui s0, 305418240"), // 0x12345000
+        riscv.assemble("lui s0, 74565"), // 0x12345
         riscv.assemble("addi s0, s0, 1656"), // 0x678
-        riscv.assemble("lui a0, 262144"), // ram start: 256K
+        riscv.assemble("lui a0, 64"), // ram start: 256K
         riscv.assemble("sw a0, s0, 0"),
         riscv.assemble("sh a0, s0, 4"),
         riscv.assemble("sb a0, s0, 8"),

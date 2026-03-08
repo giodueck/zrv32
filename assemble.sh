@@ -1,4 +1,5 @@
 #!/bin/sh
+set -e
 
 SOURCE=$1
 OUTNAME=$2
