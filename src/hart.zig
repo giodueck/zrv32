@@ -199,7 +199,7 @@ pub const Hart = struct {
 
     /// Debugging method to print the current Hart state to stderr
     pub fn printState(self: @This()) void {
-        std.debug.print("pc: {x} ({0d})\n", .{self.pc});
+        std.debug.print("pc: 0x{x:0>8}\n", .{self.pc});
         const register_names = comptime a: {
             var names: [32][]const u8 = undefined;
             for (@typeInfo(@TypeOf(riscv.RegisterNames)).@"struct".fields, 0..) |f, i| {
