@@ -32,11 +32,12 @@ pub fn main() !u8 {
 
     const usage_str =
         "Usage: zrv32 [-h|--help]\n" ++
-        "       zrv32 <binary boot executable> <binary program executable>\n";
+        "       zrv32 <binary boot executable> [<binary program executable>]\n";
 
     const help_str = usage_str ++ "\n" ++
-        "<binary executable> is an executable that contains purely Risc-V machine code.\n" ++
-        "Unlike regular executable formats, like ELF, it should not contain a header.\n\n" ++
+        "<binary * executable> is an executable that contains purely Risc-V machine code.\n" ++
+        "Unlike regular executable formats, like ELF, it should not contain a header.\n" ++
+        "A boot binary must be provided. A program binary may also be provided.\n\n" ++
         "Options:\n" ++
         "   -h  --help      Print this help menu and exit\n\n";
 
@@ -58,6 +59,8 @@ pub fn main() !u8 {
     var hart: Hart = .{};
     try hart.init(std.heap.page_allocator);
     defer hart.deinit();
+    var boot_loaded = false;
+    var program_loaded = false;
 
     // We use the streaming parser, so we consume each argument individually
     while (cla_parser.next() catch |err| {
@@ -82,13 +85,14 @@ pub fn main() !u8 {
                 defer allocator.free(buf);
                 var reader = fd.reader(buf);
                 if (try reader.getSize() > hart.bus.boot_rom_size) {
-                    try stderr.print("Boot binary \"{s}\" too large: {d} out of a maximum of {d}\n", .{arg.value.?, try reader.getSize(), hart.bus.boot_rom_size});
+                    try stderr.print("Boot binary \"{s}\" too large: {d} out of a maximum of {d}\n", .{ arg.value.?, try reader.getSize(), hart.bus.boot_rom_size });
                     return 1;
                 }
                 reader.interface.readSliceAll(buf) catch |e| {
                     if (e != error.EndOfStream) return e;
                 };
                 hart.loadBootROMBytes(buf);
+                boot_loaded = true;
             },
             'x' => {
                 var fd = try std.fs.cwd().openFile(arg.value.?, .{ .mode = .read_only });
@@ -97,13 +101,14 @@ pub fn main() !u8 {
                 defer allocator.free(buf);
                 var reader = fd.reader(buf);
                 if (try reader.getSize() > hart.bus.program_rom_size) {
-                    try stderr.print("Program binary \"{s}\" too large: {d} out of a maximum of {d}\n", .{arg.value.?, try reader.getSize(), hart.bus.program_rom_size});
+                    try stderr.print("Program binary \"{s}\" too large: {d} out of a maximum of {d}\n", .{ arg.value.?, try reader.getSize(), hart.bus.program_rom_size });
                     return 1;
                 }
                 reader.interface.readSliceAll(buf) catch |e| {
                     if (e != error.EndOfStream) return e;
                 };
                 hart.loadProgramROMBytes(buf);
+                program_loaded = true;
             },
             else => unreachable,
         }
@@ -113,6 +118,17 @@ pub fn main() !u8 {
     _ = arena.reset(.free_all);
 
     // Command-line argument parsing done
+
+    if (!boot_loaded) {
+        try stderr.print("Error: No boot binary program loaded, aborting\n\n", .{});
+        try stderr.writeAll(usage_str);
+        try stderr.flush();
+        return 1;
+    }
+    if (!program_loaded) {
+        try stderr.print("Warning: No program binary loaded\n\n", .{});
+        try stderr.flush();
+    }
 
     // Run emulator starting at boot binary until ebreak is hit
     while (!hart.ebreak) {

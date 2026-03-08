@@ -8,8 +8,8 @@ If this project goes well and the idea seems plausible, I plan to implement the 
 in Factorio's Circuit Network.
 
 ## Goals
-- [ ] RV32I: base integer (unprivileged) instruction set
-- [ ] Instruction pipeline: fetch, decode, read registers, execute, memory access (possibly combined with execute), writeback
+- [x] RV32I: base integer (unprivileged) instruction set
+- [x] 5-Stage Instruction pipeline: fetch, decode, read registers, execute and memory access, writeback
 - [ ] M: integer multiplication and division
 
 Potential goals: Run Linux on the emulated CPU; add Factorio-specific extensions
@@ -34,3 +34,17 @@ Standard Zig build commands:
 Build artifacts land in `zig-out/bin`.
 
 Run with `-h` or `--help` to get a help menu.
+
+To run a binary boot ROM program, run `./zig-out/bin/zrv32 boot.bin`.
+
+To also add a program ROM (a separate larger ROM from boot ROM), add another positional argument: `./zig-out/bin/zrv32 boot.bin program.bin`.
+
+### Creating programs
+Programs can be compiled with the `riscv32-unknown-elf-*` toolchain. The necessary commands to create the bare binary from assembly source are wrapped in the `assemble.sh` script.
+
+This script then produces an ELF and a binary .bin file:
+```bash
+$ ./assemble.sh source.s out
+$ ls
+. .. <other files> assemble.sh source.s out out.bin
+```
