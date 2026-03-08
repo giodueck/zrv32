@@ -68,6 +68,7 @@ const MemoryMap = .{
         .name = "Boot ROM",
         .access = AccessControl{
             .execute = true,
+            .read = true,
         },
         .start = BootRomStart,
         .size = BootRomSize,
@@ -177,11 +178,11 @@ pub const Bus = struct {
     pub fn store(self: *@This(), addr: u32, value: u32, width: u32) void {
         // Memory regions are spaced out with gaps greater than 4 bytes, so we only need to check if the initial
         // address is writable and can let the invalid byte writes fail silently.
-        for (@typeInfo(@TypeOf(MemoryMap)).@"struct".fields) |field| {
+        inline for (@typeInfo(@TypeOf(MemoryMap)).@"struct".fields) |field| {
             const range = @field(MemoryMap, field.name);
 
             if (addr >= range.start and addr < range.start + range.size) {
-                if (range.access.write) self.set(addr, value, width);
+                if (range.access.write) self.set(addr, value, @truncate(width));
                 return;
             }
         }
@@ -230,9 +231,10 @@ pub const Bus = struct {
             const range = @field(MemoryMap, field.name);
 
             if (addr >= range.start and addr < range.start + range.size) {
-                return if (range.access.read) self.get(addr, width) else 0;
+                return if (range.access.read) self.get(addr, @truncate(width)) else 0;
             }
         }
+        unreachable;
     }
 
     /// Called by the CPU when getting a value at a memory address for execution.

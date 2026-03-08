@@ -155,7 +155,7 @@ pub const Hart = struct {
 
     /// Load a slice of encoded instructions, flush the pipeline, then step through until every pipeline step
     /// ran the program
-    pub fn execMany(self: *@This(), program: []u32) void {
+    pub fn execMany(self: *@This(), program: []const u32) void {
         self.fetch_buf = FetchBuffer{};
         self.decode_buf = DecodeBuffer{};
         self.read_registers_buf = ReadRegistersBuffer{};
@@ -289,7 +289,9 @@ pub const Hart = struct {
             },
             .I => |value| {
                 switch (value.opcode) {
-                    @intFromEnum(riscv.Opcode.LOAD) => {},
+                    @intFromEnum(riscv.Opcode.LOAD) => {
+                        executeLoad(self, buf);
+                    },
                     @intFromEnum(riscv.Opcode.MISC_MEM) => {},
                     @intFromEnum(riscv.Opcode.OP_IMM) => {
                         executeOpImm(self, buf);
@@ -479,10 +481,52 @@ pub const Hart = struct {
         }
     }
 
+    fn executeLoad(self: *@This(), buf: *ExecuteBuffer) void {
+        _ = self;
+        buf.addr = buf.op1 +% riscv.getIImmediate(buf.instruction);
+    }
+
+    fn executeStore(self: *@This(), buf: *ExecuteBuffer) void {
+        _ = self;
+        buf.addr = buf.op1 +% riscv.getSImmediate(buf.instruction);
+    }
+
     /// Executes memory access operations like LOAD and STORE
     fn memoryAccess(self: *@This(), buf: *MemoryAccessBuffer) void {
-        _ = self;
-        _ = buf;
+        const decoded: riscv.ITypeInstruction = @bitCast(buf.instruction);
+        if (decoded.opcode == @intFromEnum(riscv.Opcode.LOAD)) {
+            switch (buf.decoded.I.funct3) {
+                riscv.Funct3.LOAD.lb, riscv.Funct3.LOAD.lbu => |value| {
+                    buf.res = self.bus.load(buf.addr, 1);
+                    if (value & 4 != 0) {
+                        buf.res |= 0xFFFF_FF00;
+                    }
+                },
+                riscv.Funct3.LOAD.lh, riscv.Funct3.LOAD.lhu => |value| {
+                    buf.res = self.bus.load(buf.addr, 2);
+                    if (value & 4 != 0) {
+                        buf.res |= 0xFFFF_0000;
+                    }
+                },
+                riscv.Funct3.LOAD.lw => {
+                    buf.res = self.bus.load(buf.addr, 4);
+                },
+                else => {}, // TODO handle illegal width
+            }
+        } else if (decoded.opcode == @intFromEnum(riscv.Opcode.STORE)) {
+            switch (buf.decoded.S.funct3) {
+                riscv.Funct3.STORE.sb => {
+                    self.bus.store(buf.addr, buf.op2, 1);
+                },
+                riscv.Funct3.STORE.sh => {
+                    self.bus.store(buf.addr, buf.op2, 2);
+                },
+                riscv.Funct3.STORE.sw => {
+                    self.bus.store(buf.addr, buf.op2, 4);
+                },
+                else => {}, // TODO handle illegal width
+            }
+        }
     }
 
     /// Writes pipeline results to the register file

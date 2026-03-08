@@ -148,6 +148,7 @@ test "addi, mov, nop" {
     try checkInstr(.{ .x8 = 15 }, "addi x9, x8, -20", .{ .x8 = 15, .x9 = @as(u32, @bitCast(@as(i32, -5))) });
     try checkInstr(.{ .x8 = 15 }, "mv x10, x8", .{ .x8 = 15, .x10 = 15 });
     try checkInstr(.{ .x8 = 15 }, "nop", .{ .x8 = 15 });
+    try checkInstr(.{ .s0 = 0x12345000 }, "addi s0, s0, 1656", .{ .s0 = 0x12345678 });
 }
 
 test "slti, sltiu, seqz" {
@@ -277,4 +278,85 @@ test "beq, bne, blt, bge, bltu, bgeu, bgt, ble, bgtu, bleu" {
     try checkInstr(.{ .s0 = 12, .s1 = 13 }, "bleu s0, s1, 100", .{ .pc = 4204 });
     try checkInstr(.{ .s0 = 13, .s1 = 12 }, "bleu s0, s1, 100", .{ .pc = 4120 });
     try checkInstr(.{ .s0 = 13, .s1 = @as(u32, @bitCast(@as(i32, -15))) }, "bleu s0, s1, 100", .{ .pc = 4204 });
+}
+
+test "lw, lh, lb, lhu, lbu" {
+    try checkInstr(.{ .a0 = 4096 }, "lw s0, a0, 0", .{ .s0 = 0x0005_2403 }); // Loads the encoding of itself
+
+    try checkInstr(.{ .a0 = 4096 }, "lh s0, a0, 0", .{ .s0 = 0x1403 }); // Loads the encoding of itself
+    try checkInstr(.{ .a0 = 4096 }, "lh s0, a0, 2", .{ .s0 = 0x0025 }); // Loads the encoding of itself
+
+    try checkInstr(.{ .a0 = 4096 }, "lb s0, a0, 0", .{ .s0 = 0x03 }); // Loads the encoding of itself
+    try checkInstr(.{ .a0 = 4096 }, "lb s0, a0, 1", .{ .s0 = 0x04 }); // Loads the encoding of itself
+    try checkInstr(.{ .a0 = 4096 }, "lb s0, a0, 2", .{ .s0 = 0x25 }); // Loads the encoding of itself
+    try checkInstr(.{ .a0 = 4096 }, "lb s0, a0, 3", .{ .s0 = 0x00 }); // Loads the encoding of itself
+}
+
+test "sw, sh, sb" {
+    const program = [_]u32{
+        riscv.assemble("lui s0, 305418240"), // 0x12345000
+        riscv.assemble("nop"),
+        riscv.assemble("nop"),
+        riscv.assemble("nop"),
+        riscv.assemble("nop"),
+        riscv.assemble("nop"),
+        riscv.assemble("nop"),
+        riscv.assemble("nop"),
+        riscv.assemble("addi s0, s0, 1656"), // 0x678
+        riscv.assemble("nop"),
+        riscv.assemble("nop"),
+        riscv.assemble("nop"),
+        riscv.assemble("nop"),
+        riscv.assemble("nop"),
+        riscv.assemble("nop"),
+        riscv.assemble("nop"),
+        riscv.assemble("nop"),
+        riscv.assemble("nop"),
+        riscv.assemble("lui a0, 262144"), // ram start: 256K
+        riscv.assemble("nop"),
+        riscv.assemble("nop"),
+        riscv.assemble("nop"),
+        riscv.assemble("nop"),
+        riscv.assemble("nop"),
+        riscv.assemble("nop"),
+        riscv.assemble("nop"),
+        riscv.assemble("nop"),
+        riscv.assemble("nop"),
+        riscv.assemble("nop"),
+        riscv.assemble("sw a0, s0, 0"),
+        riscv.assemble("nop"),
+        riscv.assemble("nop"),
+        riscv.assemble("nop"),
+        riscv.assemble("nop"),
+        riscv.assemble("nop"),
+        riscv.assemble("nop"),
+        riscv.assemble("nop"),
+        riscv.assemble("sh a0, s0, 4"),
+        riscv.assemble("nop"),
+        riscv.assemble("nop"),
+        riscv.assemble("nop"),
+        riscv.assemble("nop"),
+        riscv.assemble("nop"),
+        riscv.assemble("nop"),
+        riscv.assemble("nop"),
+        riscv.assemble("sb a0, s0, 8"),
+        riscv.assemble("nop"),
+        riscv.assemble("nop"),
+        riscv.assemble("nop"),
+        riscv.assemble("nop"),
+        riscv.assemble("nop"),
+        riscv.assemble("nop"),
+        riscv.assemble("nop"),
+    };
+    // TODO fix pipeline hazards
+
+    var hart: Hart = .{};
+    try hart.init(std.testing.allocator);
+    defer hart.deinit();
+
+    hart.execMany(&program);
+
+    try expect(hart.bus.get(hart.bus.ram_start, 4) == 0x12345678);
+    try expect(hart.bus.get(hart.bus.ram_start + 4, 2) == 0x5678);
+    try expect(hart.bus.get(hart.bus.ram_start + 8, 1) == 0x78);
 }

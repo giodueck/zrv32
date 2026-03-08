@@ -124,6 +124,18 @@ pub const Funct3 = .{
         .bltu = 0b110,
         .bgeu = 0b111,
     },
+    .LOAD = .{
+        .lb  = 0b000,
+        .lh  = 0b001,
+        .lw  = 0b010,
+        .lbu = 0b100,
+        .lhu = 0b101,
+    },
+    .STORE = .{
+        .sb  = 0b000,
+        .sh  = 0b001,
+        .sw  = 0b010,
+    },
 };
 
 // zig fmt: on
@@ -234,6 +246,16 @@ pub fn getBImmediate(instr: u32) u32 {
     return ret;
 }
 
+pub fn getSImmediate(instr: u32) u32 {
+    const decoded: STypeInstruction = @bitCast(instr);
+    var ret: u32 = @as(u32, decoded.imml) + (@as(u32, @as(u7, @bitCast(decoded.immh))) << 5);
+    // Sign-extend
+    if (instr >> 31 == 1) {
+        ret |= @truncate(0xFFFF_FFFF << 13);
+    }
+    return ret;
+}
+
 // For testing
 
 pub fn assemble(comptime instr: []const u8) u32 {
@@ -287,6 +309,14 @@ const instructions = .{
     .bgtu = .{ .func = assembleBType, .opcode = Opcode.BRANCH, .funct3 = Funct3.BRANCH.bltu, .invert = true },
     .bgeu = .{ .func = assembleBType, .opcode = Opcode.BRANCH, .funct3 = Funct3.BRANCH.bgeu },
     .bleu = .{ .func = assembleBType, .opcode = Opcode.BRANCH, .funct3 = Funct3.BRANCH.bgeu, .invert = true },
+    .lb = .{ .func = assembleIType, .opcode = Opcode.LOAD, .funct3 = Funct3.LOAD.lb },
+    .lh = .{ .func = assembleIType, .opcode = Opcode.LOAD, .funct3 = Funct3.LOAD.lh },
+    .lw = .{ .func = assembleIType, .opcode = Opcode.LOAD, .funct3 = Funct3.LOAD.lw },
+    .lbu = .{ .func = assembleIType, .opcode = Opcode.LOAD, .funct3 = Funct3.LOAD.lbu },
+    .lhu = .{ .func = assembleIType, .opcode = Opcode.LOAD, .funct3 = Funct3.LOAD.lhu },
+    .sw = .{ .func = assembleSType, .opcode = Opcode.STORE, .funct3 = Funct3.STORE.sw },
+    .sh = .{ .func = assembleSType, .opcode = Opcode.STORE, .funct3 = Funct3.STORE.sh },
+    .sb = .{ .func = assembleSType, .opcode = Opcode.STORE, .funct3 = Funct3.STORE.sb },
 };
 
 fn parseRegister(comptime name: []const u8) u5 {
@@ -418,6 +448,25 @@ fn assembleBType(comptime args: *std.mem.TokenIterator(u8, .any), comptime info:
         .imm1 = @truncate(@as(u13, @bitCast(imm)) >> 5),
         .imm2 = @truncate(@as(u13, @bitCast(imm)) >> 11),
         .imm3 = @truncate(imm >> 12),
+    });
+}
+
+fn assembleSType(comptime args: *std.mem.TokenIterator(u8, .any), comptime info: anytype) u32 {
+    const rs1 = parseRegister(args.next() orelse unreachable);
+    const rs2 = parseRegister(args.next() orelse unreachable);
+    const imm = comptime a: {
+        if (@hasField(@TypeOf(info), "imm")) {
+            break :a info.imm;
+        }
+        break :a std.fmt.parseInt(i12, args.next() orelse unreachable, 10) catch unreachable;
+    };
+    return @bitCast(STypeInstruction{
+        .opcode = @intFromEnum(info.opcode),
+        .rs1 = rs1,
+        .rs2 = rs2,
+        .funct3 = info.funct3,
+        .imml = @truncate(@as(u12, @bitCast(imm))),
+        .immh = @truncate(imm >> 5),
     });
 }
 
