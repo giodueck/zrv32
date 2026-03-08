@@ -286,15 +286,15 @@ test "lw, lh, lb, lhu, lbu" {
 
     try checkInstr(.{ .a0 = 4096 }, "lh s0, a0, 0", .{ .s0 = 0x1403 }); // Loads the encoding of itself
     try checkInstr(.{ .a0 = 4096 }, "lh s0, a0, 2", .{ .s0 = 0x0025 }); // Loads the encoding of itself
-    try checkInstr(.{ .a0 = 4099 }, "lh s0, a0, -1", .{ .s0 = 0xFFF5 }); // Loads the encoding of itself
-    try checkInstr(.{ .a0 = 4099 }, "lhu s0, a0, -1", .{ .s0 = 0xFFFF_FFF5 }); // Loads the encoding of itself
+    try checkInstr(.{ .a0 = 4099 }, "lh s0, a0, -1", .{ .s0 = 0xFFFF_FFF5 }); // Loads the encoding of itself
+    try checkInstr(.{ .a0 = 4099 }, "lhu s0, a0, -1", .{ .s0 = 0xFFF5 }); // Loads the encoding of itself
 
     try checkInstr(.{ .a0 = 4096 }, "lb s0, a0, 0", .{ .s0 = 0x03 }); // Loads the encoding of itself
     try checkInstr(.{ .a0 = 4096 }, "lb s0, a0, 1", .{ .s0 = 0x04 }); // Loads the encoding of itself
     try checkInstr(.{ .a0 = 4096 }, "lb s0, a0, 2", .{ .s0 = 0x25 }); // Loads the encoding of itself
     try checkInstr(.{ .a0 = 4096 }, "lb s0, a0, 3", .{ .s0 = 0x00 }); // Loads the encoding of itself
-    try checkInstr(.{ .a0 = 4100 }, "lb s0, a0, -1", .{ .s0 = 0xFF }); // Loads the encoding of itself
-    try checkInstr(.{ .a0 = 4100 }, "lbu s0, a0, -1", .{ .s0 = 0xFFFF_FFFF }); // Loads the encoding of itself
+    try checkInstr(.{ .a0 = 4100 }, "lb s0, a0, -1", .{ .s0 = 0xFFFF_FFFF }); // Loads the encoding of itself
+    try checkInstr(.{ .a0 = 4100 }, "lbu s0, a0, -1", .{ .s0 = 0xFF }); // Loads the encoding of itself
 }
 
 test "sw, sh, sb" {

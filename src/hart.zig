@@ -515,13 +515,13 @@ pub const Hart = struct {
             switch (buf.decoded.I.funct3) {
                 riscv.Funct3.LOAD.lb, riscv.Funct3.LOAD.lbu => |value| {
                     buf.res = self.bus.load(buf.addr, 1);
-                    if (value & 4 != 0) {
+                    if (value & 4 == 0 and buf.res >> 7 == 1) {
                         buf.res |= 0xFFFF_FF00;
                     }
                 },
                 riscv.Funct3.LOAD.lh, riscv.Funct3.LOAD.lhu => |value| {
                     buf.res = self.bus.load(buf.addr, 2);
-                    if (value & 4 != 0) {
+                    if (value & 4 == 0 and buf.res >> 15 == 1) {
                         buf.res |= 0xFFFF_0000;
                     }
                 },
