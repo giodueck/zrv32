@@ -22,7 +22,9 @@
 - [x] Control transfer
     - [x] Unconditional jumps
     - [x] Conditional branching
-- [ ] Load and Store
+- [x] Load and Store
+    - [x] lw, lh, lb, lhu, lbu
+    - [x] sw, sh, sb
 - [ ] Memory ordering
 - [ ] Environment call and Breakpoints
 
