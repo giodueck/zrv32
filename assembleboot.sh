@@ -9,5 +9,6 @@ if [ $# -lt 2 ]; then
     exit 1
 fi
 
-riscv32-unknown-elf-as --march=rv32i $SOURCE -o $OUTNAME
+riscv32-unknown-elf-as --march=rv32i $SOURCE -o $SOURCE.o
+riscv32-unknown-elf-ld -Ttext=0x1000 $SOURCE.o -o $OUTNAME
 riscv32-unknown-elf-objcopy -O binary $OUTNAME $OUTNAME.bin
