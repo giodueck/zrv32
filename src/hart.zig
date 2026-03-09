@@ -315,6 +315,8 @@ pub const Hart = struct {
         if (self.flush > 0) {
             buf.instruction = 19; // This is the cannonical NOP
             buf.decoded = .{ .I = @bitCast(buf.instruction) };
+            buf.res = 0;
+            buf.rd = 0;
             return;
         }
 
@@ -645,8 +647,7 @@ pub const Hart = struct {
             },
             else => {},
         }
-        if (rd != 0) {
-            self.setReg(rd, buf.res);
-        }
+        // setReg discards x0 itself
+        self.setReg(rd, buf.res);
     }
 };
