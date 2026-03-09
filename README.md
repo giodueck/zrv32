@@ -81,11 +81,11 @@ zero ( x0) 0x00000000 |   ra ( x1) 0x00000000
 ```
 
 ### Creating programs
-Programs can be compiled with the `riscv32-unknown-elf-*` toolchain. The necessary commands to create the bare binary from assembly source are wrapped in the `assemble.sh` script.
+Programs can be compiled with the `riscv32-unknown-elf-*` toolchain. The necessary commands to create the bare binary from assembly source are wrapped in the `assembleboot.sh` and `assembleprog.sh` scripts. The difference between them is only the base address used, but it is crucial for each type of binary (boot and program).
 
 This script then produces an ELF and a binary .bin file:
 ```bash
-$ ./assemble.sh source.s out
+$ ./assembleboot.sh source.s out
 $ ls
-. .. <other files> assemble.sh source.s out out.bin
+. .. <other files> assembleboot.sh source.s out out.bin
 ```
