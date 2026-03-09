@@ -77,6 +77,7 @@ const MemoryMap = .{
         .name = "Program ROM",
         .access = AccessControl{
             .execute = true,
+            .read = true,
         },
         .start = ProgramRomStart,
         .size = ProgramRomSize,
