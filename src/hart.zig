@@ -58,6 +58,7 @@ pub const Hart = struct {
     pub fn init(self: *@This(), allocator: std.mem.Allocator) !void {
         self.allocator = allocator;
         try self.bus.init(self.allocator);
+        self.pc = self.bus.boot_rom_start;
     }
 
     pub fn deinit(self: @This()) void {
