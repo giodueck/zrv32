@@ -31,3 +31,11 @@
     - [x] ebreak
     - [ ] system (just a NOP for now)
 
+## Extensions
+
+- [ ] M extension
+
+## Interactive emulator
+
+- [x] Run program
+- [ ] Step through program
