@@ -87,5 +87,5 @@ This script then produces an ELF and a binary .bin file:
 ```bash
 $ ./assembleboot.sh source.s out
 $ ls
-. .. <other files> assembleboot.sh source.s out out.bin
+. .. <other files> assembleboot.sh source.s out out.o out.bin
 ```
