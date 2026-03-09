@@ -532,26 +532,44 @@ pub const Hart = struct {
         const dest = self.pc -% 12 +% riscv.getBImmediate(buf.instruction);
         switch (buf.decoded.B.funct3) {
             riscv.Funct3.BRANCH.beq => {
-                if (buf.op1 == buf.op2) self.next_pc = dest;
+                if (buf.op1 == buf.op2) {
+                    self.next_pc = dest;
+                    self.flush = 4;
+                }
             },
             riscv.Funct3.BRANCH.bne => {
-                if (buf.op1 != buf.op2) self.next_pc = dest;
+                if (buf.op1 != buf.op2) {
+                    self.next_pc = dest;
+                    self.flush = 4;
+                }
             },
             riscv.Funct3.BRANCH.blt => {
                 const rs1: i32 = @bitCast(buf.op1);
                 const rs2: i32 = @bitCast(buf.op2);
-                if (rs1 < rs2) self.next_pc = dest;
+                if (rs1 < rs2) {
+                    self.next_pc = dest;
+                    self.flush = 4;
+                }
             },
             riscv.Funct3.BRANCH.bge => {
                 const rs1: i32 = @bitCast(buf.op1);
                 const rs2: i32 = @bitCast(buf.op2);
-                if (rs1 >= rs2) self.next_pc = dest;
+                if (rs1 >= rs2) {
+                    self.next_pc = dest;
+                    self.flush = 4;
+                }
             },
             riscv.Funct3.BRANCH.bltu => {
-                if (buf.op1 < buf.op2) self.next_pc = dest;
+                if (buf.op1 < buf.op2) {
+                    self.next_pc = dest;
+                    self.flush = 4;
+                }
             },
             riscv.Funct3.BRANCH.bgeu => {
-                if (buf.op1 >= buf.op2) self.next_pc = dest;
+                if (buf.op1 >= buf.op2) {
+                    self.next_pc = dest;
+                    self.flush = 4;
+                }
             },
             else => {}, // TODO handle illegal instructions
         }
