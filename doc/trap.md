@@ -40,8 +40,8 @@ That is: the 0 address must jump to the actual start, any following addresses mu
 ## Traps
 
 1. Illegal Instruction: invalid or unimplemented instruction
-2. Breakpoint: ebreak
-3. Environment Call: ecall
+2. Environment Call: ecall
+3. Reserved
 4. Load Access Misaligned
 5. Load Access Fault: address not readable
 6. Store Access Misaligned

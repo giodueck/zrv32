@@ -215,7 +215,6 @@ pub const RegisterAliases = .{
 pub const Traps = enum(u4) {
     None = 0,
     IllegalInstruction,
-    Breakpoint,
     EnvironmentCall,
     LoadAccessMisaligned,
     LoadAccessFault,

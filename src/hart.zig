@@ -46,6 +46,7 @@ pub const Hart = struct {
     next_pc: u32 = 0,
     flush: u32 = 0,
     ebreak: bool = false,
+    fatalTrap: ?riscv.Traps = null,
 
     fetch_buf: FetchBuffer = .{},
     decode_buf: DecodeBuffer = .{},
@@ -60,6 +61,7 @@ pub const Hart = struct {
         self.allocator = allocator;
         try self.bus.init(self.allocator);
         self.pc = self.bus.boot_rom_start;
+        self.flush = 3;
     }
 
     pub fn deinit(self: @This()) void {
@@ -168,6 +170,7 @@ pub const Hart = struct {
 
         for (program) |_| {
             self.step();
+            if (self.fatalTrap != null or self.ebreak) break;
         }
     }
 
@@ -219,6 +222,9 @@ pub const Hart = struct {
         for (0..16) |i| {
             std.debug.print("{s: >4} ({s: >3}) 0x{x:08} | {s: >4} ({s: >3}) 0x{x:08}\n", .{ register_aliases[i * 2], register_names[i * 2], self.registers[i * 2], register_aliases[i * 2 + 1], register_names[i * 2 + 1], self.registers[i * 2 + 1] });
         }
+        if (self.fatalTrap != null) {
+            std.debug.print("Fatal trap: {any}\n", .{self.fatalTrap.?});
+        }
     }
 
     // Emulation methods
@@ -232,11 +238,17 @@ pub const Hart = struct {
     /// Run a single cycle of the CPU, advancing each pipeline stage once
     pub fn step(self: *@This()) void {
         self.next_pc = self.pc +% 4;
+        defer self.pc = self.next_pc;
+
         // Pipeline detail: writeback needs to finish before reading registers begins.
         // Since we want to use all buffers before writing to them, we do them in reverse order anyways
 
         // 5. Writeback
         self.writeback(&self.execute_buf);
+
+        // 5. pt 2 Trap handling
+        self.handleTrap(&self.execute_buf);
+        if (self.fatalTrap != null) return;
 
         // 4. Execute and Memory access
         self.execute_buf.instruction = self.read_registers_buf.instruction;
@@ -276,10 +288,10 @@ pub const Hart = struct {
             } else if (e == bus.MemoryError.InstructionAccessFault) {
                 self.execute_buf.trap = riscv.Traps.InstructionAccessFault;
             }
+            self.fatalTrap = self.execute_buf.trap.?;
             break :err 0;
         };
 
-        self.pc = self.next_pc;
         self.flush -|= 1;
     }
 
@@ -314,6 +326,31 @@ pub const Hart = struct {
                 buf.rd = buf.decoded.J.rd;
             },
             else => {},
+        }
+    }
+
+    /// Handle traps set by the Hart
+    fn handleTrap(self: *@This(), buf: *ExecuteBuffer) void {
+        if (buf.trap == null) return;
+        switch (buf.trap.?) {
+            .None => {},
+            .IllegalInstruction => {
+                self.fatalTrap = buf.trap.?;
+            },
+            .EnvironmentCall => {},
+            .LoadAccessMisaligned => {},
+            .LoadAccessFault => {},
+            .StoreAccessMisaligned => {},
+            .StoreAccessFault => {},
+            .InstructionAccessFault => {
+                self.fatalTrap = buf.trap.?;
+            },
+            .InstructionAddressMisaligned => {
+                self.fatalTrap = buf.trap.?;
+            },
+            .Misc, _ => {
+                self.fatalTrap = buf.trap.?;
+            },
         }
     }
 
@@ -359,7 +396,9 @@ pub const Hart = struct {
                     @intFromEnum(riscv.Opcode.OP) => {
                         executeOp(self, buf);
                     },
-                    else => {},
+                    else => {
+                        buf.trap = riscv.Traps.IllegalInstruction;
+                    },
                 }
             },
             .I => |value| {
@@ -381,7 +420,9 @@ pub const Hart = struct {
                     @intFromEnum(riscv.Opcode.SYSTEM) => {
                         executeSystem(self, buf);
                     },
-                    else => {},
+                    else => {
+                        buf.trap = riscv.Traps.IllegalInstruction;
+                    },
                 }
             },
             .S => |value| {
@@ -389,7 +430,9 @@ pub const Hart = struct {
                     @intFromEnum(riscv.Opcode.STORE) => {
                         executeMemoryAccess(self, buf);
                     },
-                    else => {},
+                    else => {
+                        buf.trap = riscv.Traps.IllegalInstruction;
+                    },
                 }
             },
             .B => |value| {
@@ -397,7 +440,9 @@ pub const Hart = struct {
                     @intFromEnum(riscv.Opcode.BRANCH) => {
                         executeBranch(self, buf);
                     },
-                    else => {},
+                    else => {
+                        buf.trap = riscv.Traps.IllegalInstruction;
+                    },
                 }
             },
             .U => |value| {
@@ -408,7 +453,9 @@ pub const Hart = struct {
                     @intFromEnum(riscv.Opcode.AUIPC) => {
                         executeAuipc(self, buf);
                     },
-                    else => {},
+                    else => {
+                        buf.trap = riscv.Traps.IllegalInstruction;
+                    },
                 }
             },
             .J => |value| {
@@ -416,10 +463,14 @@ pub const Hart = struct {
                     @intFromEnum(riscv.Opcode.JAL) => {
                         executeJal(self, buf);
                     },
-                    else => {},
+                    else => {
+                        buf.trap = riscv.Traps.IllegalInstruction;
+                    },
                 }
             },
-            .none => {}, // TODO handle unimplemented or illegal instructions
+            .none => {
+                buf.trap = riscv.Traps.IllegalInstruction;
+            },
         }
     }
 
@@ -462,8 +513,9 @@ pub const Hart = struct {
                 } else if (decoded.imm >> 5 == 0) {
                     // logical
                     buf.res = std.math.shr(u32, buf.op1, decoded.imm & 0x1F);
+                } else {
+                    buf.trap = riscv.Traps.IllegalInstruction;
                 }
-                // TODO handle illegal instructions
             },
         }
     }
@@ -488,7 +540,9 @@ pub const Hart = struct {
                     buf.res +%= buf.op2;
                 } else if (decoded.funct7 == 0b0100000) { // sub
                     buf.res -%= buf.op2;
-                } // TODO handle illegal instructions
+                } else {
+                    buf.trap = riscv.Traps.IllegalInstruction;
+                }
             },
             riscv.Funct3.OP.slt => {
                 const rs1: i32 = @bitCast(buf.op1);
@@ -522,8 +576,9 @@ pub const Hart = struct {
                 } else if (decoded.funct7 == 0) {
                     // logical
                     buf.res = std.math.shr(u32, buf.op1, buf.op2 & 0x1F);
+                } else {
+                    buf.trap = riscv.Traps.IllegalInstruction;
                 }
-                // TODO handle illegal instructions
             },
         }
     }
@@ -583,7 +638,9 @@ pub const Hart = struct {
                     self.flush = 4;
                 }
             },
-            else => {}, // TODO handle illegal instructions
+            else => {
+                buf.trap = riscv.Traps.IllegalInstruction;
+            },
         }
     }
 
@@ -629,7 +686,9 @@ pub const Hart = struct {
                         break :err 0;
                     };
                 },
-                else => {}, // TODO handle illegal width
+                else => {
+                    buf.trap = riscv.Traps.IllegalInstruction;
+                },
             }
         } else if (decoded.opcode == @intFromEnum(riscv.Opcode.STORE)) {
             buf.addr = buf.op1 +% riscv.getSImmediate(buf.instruction);
@@ -661,7 +720,9 @@ pub const Hart = struct {
                         }
                     };
                 },
-                else => {}, // TODO handle illegal width
+                else => {
+                    buf.trap = riscv.Traps.IllegalInstruction;
+                },
             }
         }
     }
@@ -674,7 +735,9 @@ pub const Hart = struct {
         } else if (decoded.imm == 1) {
             // EBREAK
             self.ebreak = true;
-        } // TODO handle illegal values
+        } else {
+            buf.trap = riscv.Traps.IllegalInstruction;
+        }
     }
 
     /// Writes pipeline results to the register file
