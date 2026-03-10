@@ -63,6 +63,15 @@ const AccessControl = struct {
     execute: bool = false,
 };
 
+pub const MemoryError = error{
+    IllegalInstruction,
+    InstructionAccessFault,
+    InstructionAddressMisaligned,
+    LoadAccessFault,
+    StoreAccessFault,
+    // Load/StoreAccessMisaligned could potentially also be here, but we can support those easily
+};
+
 const MemoryMap = .{
     .{
         .name = "Boot ROM",
@@ -121,7 +130,8 @@ pub const Bus = struct {
     }
 
     /// Set a single byte.
-    /// Illegal access or illegal width will fail silently, no traps are set using this method.
+    /// Illegal access will fail silently.
+    /// Does not check access control.
     fn setb(self: *@This(), addr: u32, byte: u8) void {
         if (addr >= RamStart and addr < RamStart + RamSize) {
             self.ram[addr - RamStart] = byte;
@@ -131,6 +141,7 @@ pub const Bus = struct {
             self.ram[addr - BootRomStart] = byte;
         }
         // else invalid address
+        return;
     }
 
     /// Set the memory at the address to the value, truncated to width bytes.
@@ -151,11 +162,6 @@ pub const Bus = struct {
                 bytes_buf[0] = @truncate(value);
                 bytes_buf[1] = @truncate(value >> 8);
             },
-            3 => {
-                bytes_buf[0] = @truncate(value);
-                bytes_buf[1] = @truncate(value >> 8);
-                bytes_buf[2] = @truncate(value >> 16);
-            },
             4 => {
                 bytes_buf[0] = @truncate(value);
                 bytes_buf[1] = @truncate(value >> 8);
@@ -170,27 +176,33 @@ pub const Bus = struct {
         bytes = bytes_buf[0..width];
 
         for (bytes, 0..) |b, i| {
-            self.setb(addr +% @as(u32, @truncate(i)), b);
+            self.setb(addr +% @as(u32, @intCast(i)), b);
         }
     }
 
     /// Called by the CPU when setting a value at a memory address.
-    /// Applies some restrictions to what memory ranges can be written to.
-    pub fn store(self: *@This(), addr: u32, value: u32, width: u32) void {
-        // Memory regions are spaced out with gaps greater than 4 bytes, so we only need to check if the initial
-        // address is writable and can let the invalid byte writes fail silently.
+    /// Applies some restrictions to what memory ranges can be written to, and may fail depending on it.
+    pub fn store(self: *@This(), addr: u32, value: u32, width: u32) MemoryError!void {
+        if (width > 4 or width == 3) return MemoryError.IllegalInstruction;
+
+        // setb does not check access control, we need to do that here.
+        // If a store for any address outside the allowed ranges is requested, return with a StoreAccessFault
         inline for (@typeInfo(@TypeOf(MemoryMap)).@"struct".fields) |field| {
             const range = @field(MemoryMap, field.name);
 
-            if (addr >= range.start and addr < range.start + range.size) {
-                if (range.access.write) self.set(addr, value, @truncate(width));
+            if (addr >= range.start and addr < range.start + range.size and range.access.write) {
+                for (0..width) |i| {
+                    self.setb(addr +% @as(u32, @intCast(i)), @truncate(value >> @intCast(8 * i)));
+                }
                 return;
             }
         }
+        return MemoryError.StoreAccessFault;
     }
 
     /// Get a single byte.
-    /// Illegal access will fail silently and return 0, no traps are set using this
+    /// Illegal access will fail silently and return 0.
+    /// Does not check access control.
     fn getb(self: @This(), addr: u32) u8 {
         if (addr >= RamStart and addr < RamStart + RamSize) {
             return self.ram[addr - RamStart];
@@ -199,8 +211,8 @@ pub const Bus = struct {
         } else if (addr >= BootRomStart and addr < BootRomStart + BootRomSize) {
             return self.ram[addr - BootRomStart];
         }
-        return 0;
         // else invalid address
+        return 0;
     }
 
     /// Get the memory at the address with width bytes.
@@ -224,33 +236,42 @@ pub const Bus = struct {
     }
 
     /// Called by the CPU when getting a value at a memory address.
-    /// Applies some restrictions to what memory ranges can be read from.
-    pub fn load(self: *@This(), addr: u32, width: u32) u32 {
-        // Memory regions are spaced out with gaps greater than 4 bytes, so we only need to check if the initial
-        // address is writable and can let the invalid byte writes fail silently.
+    /// Applies some restrictions to what memory ranges can be read from, and may fail depending on it.
+    pub fn load(self: *@This(), addr: u32, width: u32) MemoryError!u32 {
+        if (width > 4 or width == 3) return MemoryError.IllegalInstruction;
+
+        var ret: u32 = 0;
+
+        // getb does not check access control, we need to do that here.
+        // If a load for any address outside the allowed ranges is requested, return with a LaodAccessFault
         inline for (@typeInfo(@TypeOf(MemoryMap)).@"struct".fields) |field| {
             const range = @field(MemoryMap, field.name);
 
-            if (addr >= range.start and addr < range.start + range.size) {
-                return if (range.access.read) self.get(addr, @truncate(width)) else 0;
+            if (addr >= range.start and addr < range.start + range.size and range.access.read) {
+                for (0..width) |i| {
+                    ret |= @as(u32, self.getb(addr +% @as(u32, @truncate(i)))) << (8 * @as(u5, @truncate(i)));
+                }
+                return ret;
             }
         }
-        unreachable;
+        return MemoryError.LoadAccessFault;
     }
 
     /// Called by the CPU when getting a value at a memory address for execution.
-    /// Applies some restrictions to what memory ranges can be executed from.
-    pub fn fetch(self: *@This(), addr: u32) u32 {
-        // Memory regions are spaced out with gaps greater than 4 bytes, so we only need to check if the initial
-        // address is writable and can let the invalid byte writes fail silently.
+    /// Applies some restrictions to what memory ranges can be executed from, and may fail depending on it.
+    pub fn fetch(self: *@This(), addr: u32) MemoryError!u32 {
+        if (addr & 3 != 0) return MemoryError.InstructionAddressMisaligned;
+
+        // get does not check access control, we need to do that here.
+        // If a start address is allowed and aligned, all bytes should generally be allowed to be fetched.
         inline for (@typeInfo(@TypeOf(MemoryMap)).@"struct".fields) |field| {
             const range = @field(MemoryMap, field.name);
 
-            if (addr >= range.start and addr < range.start + range.size) {
-                return if (range.access.execute) self.get(addr, 4) else 0;
+            if (addr >= range.start and addr < range.start + range.size and range.access.execute) {
+                return self.get(addr, 4);
             }
         }
 
-        return 0;
+        return MemoryError.InstructionAccessFault;
     }
 };

@@ -39,15 +39,16 @@ That is: the 0 address must jump to the actual start, any following addresses mu
 
 ## Traps
 
-1. Instruction Access Fault: address at PC is not executable
-2. Illegal Instruction: invalid or unimplemented instruction
-3. Breakpoint: ebreak
+1. Illegal Instruction: invalid or unimplemented instruction
+2. Breakpoint: ebreak
+3. Environment Call: ecall
 4. Load Access Misaligned
 5. Load Access Fault: address not readable
 6. Store Access Misaligned
 7. Store Access Fault: address not writable
-8. Environment Call: ecall
-9. to 15. reserved
+8. Instruction Access Fault: address at PC is not executable
+9. Instruction Address Misaligned: tried fetching from an address not aligned to 4 bytes
+10. to 14. reserved, 15. Misc for unknown faults (should not happen)
 
 Some of these may be implemented as invisible traps, like misaligned store or load.
 

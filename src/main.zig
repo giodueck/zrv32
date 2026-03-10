@@ -379,7 +379,7 @@ test "sw, sh, sb" {
 
     hart.execMany(&program);
 
-    try expectEqual(hart.bus.get(hart.bus.ram_start, 4), 0x12345678);
-    try expectEqual(hart.bus.get(hart.bus.ram_start + 4, 2), 0x5678);
-    try expectEqual(hart.bus.get(hart.bus.ram_start + 8, 1), 0x78);
+    try expectEqual(0x12345678, hart.bus.get(hart.bus.ram_start, 4));
+    try expectEqual(0x5678, hart.bus.get(hart.bus.ram_start + 4, 2));
+    try expectEqual(0x78, hart.bus.get(hart.bus.ram_start + 8, 1));
 }

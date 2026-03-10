@@ -137,8 +137,10 @@ pub const Funct3 = .{
         .sw  = 0b010,
     },
 };
-
 // zig fmt: on
+
+pub const NOP: u32 = 19;
+
 pub const RegisterNames = .{
     .x0 = 0,
     .x1 = 1,
@@ -208,6 +210,21 @@ pub const RegisterAliases = .{
     .t4 = 29,
     .t5 = 30,
     .t6 = 31,
+};
+
+pub const Traps = enum(u4) {
+    None = 0,
+    IllegalInstruction,
+    Breakpoint,
+    EnvironmentCall,
+    LoadAccessMisaligned,
+    LoadAccessFault,
+    StoreAccessMisaligned,
+    StoreAccessFault,
+    InstructionAccessFault,
+    InstructionAddressMisaligned,
+    Misc = 15,
+    _,
 };
 
 /// Returns the I-Immediate generated from the instruction.

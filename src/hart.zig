@@ -35,6 +35,7 @@ const ExecuteBuffer = struct {
     rd: u5 = 0,
     fw_rd: u5 = 0,
     fw_res: u32 = 0,
+    trap: ?riscv.Traps = null,
 };
 
 // Writeback does not need to pass information to any other stage, so it doesn't get a buffer
@@ -243,6 +244,7 @@ pub const Hart = struct {
         self.execute_buf.op1 = self.read_registers_buf.op1;
         self.execute_buf.op2 = self.read_registers_buf.op2;
         self.execute_buf.rd = self.read_registers_buf.rd;
+        self.execute_buf.trap = null;
         self.execute(&self.execute_buf);
         //  pipeline forward for next execute
         self.execute_buf.fw_res = self.execute_buf.res;
@@ -268,7 +270,14 @@ pub const Hart = struct {
         }
 
         // 1. Fetch
-        self.fetch_buf.instruction = self.bus.fetch(self.pc);
+        self.fetch_buf.instruction = self.bus.fetch(self.pc) catch |e| err: {
+            if (e == bus.MemoryError.InstructionAddressMisaligned) {
+                self.execute_buf.trap = riscv.Traps.InstructionAddressMisaligned;
+            } else if (e == bus.MemoryError.InstructionAccessFault) {
+                self.execute_buf.trap = riscv.Traps.InstructionAccessFault;
+            }
+            break :err 0;
+        };
 
         self.pc = self.next_pc;
         self.flush -|= 1;
@@ -313,7 +322,7 @@ pub const Hart = struct {
         // After a branch or jump, the pipeline must be flushed, which invalidates instructions in the pipeline
         // that were not meant to be executed.
         if (self.flush > 0) {
-            buf.instruction = 19; // This is the cannonical NOP
+            buf.instruction = riscv.NOP;
             buf.decoded = .{ .I = @bitCast(buf.instruction) };
             buf.res = 0;
             buf.rd = 0;
@@ -585,19 +594,40 @@ pub const Hart = struct {
             buf.addr = buf.op1 +% riscv.getIImmediate(buf.instruction);
             switch (buf.decoded.I.funct3) {
                 riscv.Funct3.LOAD.lb, riscv.Funct3.LOAD.lbu => |value| {
-                    buf.res = self.bus.load(buf.addr, 1);
+                    buf.res = self.bus.load(buf.addr, 1) catch |e| err: {
+                        if (e == bus.MemoryError.LoadAccessFault) {
+                            buf.trap = riscv.Traps.LoadAccessFault;
+                        } else if (e == bus.MemoryError.IllegalInstruction) {
+                            buf.trap = riscv.Traps.IllegalInstruction;
+                        }
+                        break :err 0;
+                    };
                     if (value & 4 == 0 and buf.res >> 7 == 1) {
                         buf.res |= 0xFFFF_FF00;
                     }
                 },
                 riscv.Funct3.LOAD.lh, riscv.Funct3.LOAD.lhu => |value| {
-                    buf.res = self.bus.load(buf.addr, 2);
+                    buf.res = self.bus.load(buf.addr, 2) catch |e| err: {
+                        if (e == bus.MemoryError.LoadAccessFault) {
+                            buf.trap = riscv.Traps.LoadAccessFault;
+                        } else if (e == bus.MemoryError.IllegalInstruction) {
+                            buf.trap = riscv.Traps.IllegalInstruction;
+                        }
+                        break :err 0;
+                    };
                     if (value & 4 == 0 and buf.res >> 15 == 1) {
                         buf.res |= 0xFFFF_0000;
                     }
                 },
                 riscv.Funct3.LOAD.lw => {
-                    buf.res = self.bus.load(buf.addr, 4);
+                    buf.res = self.bus.load(buf.addr, 4) catch |e| err: {
+                        if (e == bus.MemoryError.LoadAccessFault) {
+                            buf.trap = riscv.Traps.LoadAccessFault;
+                        } else if (e == bus.MemoryError.IllegalInstruction) {
+                            buf.trap = riscv.Traps.IllegalInstruction;
+                        }
+                        break :err 0;
+                    };
                 },
                 else => {}, // TODO handle illegal width
             }
@@ -605,13 +635,31 @@ pub const Hart = struct {
             buf.addr = buf.op1 +% riscv.getSImmediate(buf.instruction);
             switch (buf.decoded.S.funct3) {
                 riscv.Funct3.STORE.sb => {
-                    self.bus.store(buf.addr, buf.op2, 1);
+                    self.bus.store(buf.addr, buf.op2, 1) catch |e| {
+                        if (e == bus.MemoryError.StoreAccessFault) {
+                            buf.trap = riscv.Traps.StoreAccessFault;
+                        } else if (e == bus.MemoryError.IllegalInstruction) {
+                            buf.trap = riscv.Traps.IllegalInstruction;
+                        }
+                    };
                 },
                 riscv.Funct3.STORE.sh => {
-                    self.bus.store(buf.addr, buf.op2, 2);
+                    self.bus.store(buf.addr, buf.op2, 2) catch |e| {
+                        if (e == bus.MemoryError.StoreAccessFault) {
+                            buf.trap = riscv.Traps.StoreAccessFault;
+                        } else if (e == bus.MemoryError.IllegalInstruction) {
+                            buf.trap = riscv.Traps.IllegalInstruction;
+                        }
+                    };
                 },
                 riscv.Funct3.STORE.sw => {
-                    self.bus.store(buf.addr, buf.op2, 4);
+                    self.bus.store(buf.addr, buf.op2, 4) catch |e| {
+                        if (e == bus.MemoryError.StoreAccessFault) {
+                            buf.trap = riscv.Traps.StoreAccessFault;
+                        } else if (e == bus.MemoryError.IllegalInstruction) {
+                            buf.trap = riscv.Traps.IllegalInstruction;
+                        }
+                    };
                 },
                 else => {}, // TODO handle illegal width
             }
