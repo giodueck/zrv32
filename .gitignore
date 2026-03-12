@@ -5,3 +5,6 @@ zig-out/
 out
 *.bin
 *.s
+
+output/
+riscv-tests/

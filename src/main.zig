@@ -131,7 +131,7 @@ pub fn main() !u8 {
     }
 
     // Run emulator starting at boot binary until ebreak is hit
-    while (!hart.ebreak and hart.fatalTrap == null) {
+    while (!hart.ebreak and hart.fatal_exception == null) {
         hart.step();
     }
 
@@ -188,13 +188,13 @@ test "memory access control fetch" {
     // Unmapped memory
     hart.pc = 0;
     hart.step();
-    try expectEqual(riscv.Traps.InstructionAccessFault, hart.fatalTrap.?);
+    try expectEqual(riscv.ExceptionCause.InstructionAccessFault, hart.fatal_exception.?);
 
     // RAM
     hart.bus.set(0x4_0000, 1, 4);
     hart.pc = 0x4_0000;
     hart.step();
-    try expectEqual(riscv.Traps.InstructionAccessFault, hart.fatalTrap.?);
+    try expectEqual(riscv.ExceptionCause.InstructionAccessFault, hart.fatal_exception.?);
 }
 
 pub fn checkInstr(initial_state: anytype, comptime instr: []const u8, new_state: anytype) !void {

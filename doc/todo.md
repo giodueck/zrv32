@@ -29,10 +29,12 @@
     this is just a NOP
 - [ ] Environment call and Breakpoints
     - [x] ebreak
-    - [ ] system (just a NOP for now)
+    - [ ] priv
+    - [ ] zicsr
 
 ## Extensions
 
+- [ ] Zicsr extension (and machine/user mode privilege)
 - [ ] M extension
 
 ## Interactive emulator

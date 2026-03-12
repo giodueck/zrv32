@@ -36,32 +36,93 @@ const ExecuteBuffer = struct {
     fw_rd: u5 = 0,
     fw_res: u32 = 0,
     trap: ?riscv.Traps = null,
+    exception: ?riscv.ExceptionCause = null,
 };
 
 // Writeback does not need to pass information to any other stage, so it doesn't get a buffer
 
+// These CSRs must be readable but if unimplemented may always read 0
+const UnimpCsr = enum {
+    misa,
+    mvendorid,
+    marchid,
+    mimpid,
+    mhartid, // This is technically correct, since this is a single-threaded emulator and it must have one hart with id 0
+};
+
 pub const Hart = struct {
+    // Hart state
     registers: [32]u32 = [_]u32{0} ** 32,
     pc: u32 = 0,
     next_pc: u32 = 0,
     flush: u32 = 0,
     ebreak: bool = false,
-    fatalTrap: ?riscv.Traps = null,
+    fatal_exception: ?riscv.ExceptionCause = null,
+    priv: riscv.Priv = .Machine,
 
+    // Control and status registers
+    mstatus: riscv.MStatus = std.mem.zeroes(riscv.MStatus),
+    mstatush: riscv.MStatusH = std.mem.zeroes(riscv.MStatusH),
+    mtvec: riscv.MTrapVector = std.mem.zeroes(riscv.MTrapVector),
+    // Reads and writes are divided into mcycle and mcycleh
+    // cycle is a read-only shadow of this register
+    mcycle: u64 = 0,
+    // Reads and writes are divided into minstret and minstreth
+    // instret is a read-only shadow of this register
+    minstret: u64 = 0,
+    // All hardware performance counters and events are read-only 0, and time will not be implemented.
+    // Access to cycle and instret in user-mode is forbidden, so this is read-only 0 as well.
+    mcounteren: u32 = 0,
+    // Also read-only 0.
+    mcounterinhibit: u32 = 0,
+    /// Scratch register for dedicated M-mode use
+    mscratch: u32 = 0,
+    /// Machine exception PC
+    mepc: u32 = 0,
+    /// Machine cause, holds the cause of a trap. If caused by an interrupt, MSBit is 1.
+    mcause: u32 = 0,
+    /// When a machine trap is taken, mtval is either set to exception-specific information or 0
+    mtval: u32 = 0,
+    /// Machine config pointer, unimplemented so read-only 0
+    mconfigptr: u32 = 0,
+    /// Machine environment configuration, controls memory ordering which is a noop, so read-only 0
+    menvcfg: u32 = 0,
+    /// Machine environment configuration, controls memory ordering which is a noop, so read-only 0
+    menvcfgh: u32 = 0,
+
+    // Pipeline buffers
     fetch_buf: FetchBuffer = .{},
     decode_buf: DecodeBuffer = .{},
     read_registers_buf: ReadRegistersBuffer = .{},
     execute_buf: ExecuteBuffer = .{},
 
+    // Memory bus implementation
     bus: bus.Bus = .{},
 
+    // Allocator for internal use
     allocator: std.mem.Allocator = undefined,
 
     pub fn init(self: *@This(), allocator: std.mem.Allocator) !void {
         self.allocator = allocator;
         try self.bus.init(self.allocator);
+        self.priv = .Machine;
         self.pc = self.bus.boot_rom_start;
         self.flush = 3;
+        self.mstatus = std.mem.zeroes(riscv.MStatus);
+        self.mstatush = std.mem.zeroes(riscv.MStatusH);
+        self.mstatush.mdt = 1;
+        self.mtvec = std.mem.zeroes(riscv.MTrapVector);
+        self.mcycle = 0;
+        self.minstret = 0;
+        self.mcounteren = 0;
+        self.mcounterinhibit = 0;
+        self.mscratch = 0;
+        self.mepc = 0;
+        self.mcause = 0;
+        self.mtval = 0;
+        self.mconfigptr = 0;
+        self.menvcfg = 0;
+        self.menvcfgh = 0;
     }
 
     pub fn deinit(self: @This()) void {
@@ -170,7 +231,7 @@ pub const Hart = struct {
 
         for (program) |_| {
             self.step();
-            if (self.fatalTrap != null or self.ebreak) break;
+            if (self.fatal_exception != null or self.ebreak) break;
         }
     }
 
@@ -222,8 +283,8 @@ pub const Hart = struct {
         for (0..16) |i| {
             std.debug.print("{s: >4} ({s: >3}) 0x{x:08} | {s: >4} ({s: >3}) 0x{x:08}\n", .{ register_aliases[i * 2], register_names[i * 2], self.registers[i * 2], register_aliases[i * 2 + 1], register_names[i * 2 + 1], self.registers[i * 2 + 1] });
         }
-        if (self.fatalTrap != null) {
-            std.debug.print("Fatal trap: {any}\n", .{self.fatalTrap.?});
+        if (self.fatal_exception != null) {
+            std.debug.print("Fatal trap: {any}\n", .{self.fatal_exception.?});
         }
     }
 
@@ -239,6 +300,7 @@ pub const Hart = struct {
     pub fn step(self: *@This()) void {
         self.next_pc = self.pc +% 4;
         defer self.pc = self.next_pc;
+        defer self.mcycle +%= 1;
 
         // Pipeline detail: writeback needs to finish before reading registers begins.
         // Since we want to use all buffers before writing to them, we do them in reverse order anyways
@@ -248,7 +310,7 @@ pub const Hart = struct {
 
         // 5. pt 2 Trap handling
         self.handleTrap(&self.execute_buf);
-        if (self.fatalTrap != null) return;
+        if (self.fatal_exception != null) return;
 
         // 4. Execute and Memory access
         self.execute_buf.instruction = self.read_registers_buf.instruction;
@@ -284,11 +346,11 @@ pub const Hart = struct {
         // 1. Fetch
         self.fetch_buf.instruction = self.bus.fetch(self.pc) catch |e| err: {
             if (e == bus.MemoryError.InstructionAddressMisaligned) {
-                self.execute_buf.trap = riscv.Traps.InstructionAddressMisaligned;
+                self.execute_buf.exception = riscv.ExceptionCause.InstructionAddressMisaligned;
             } else if (e == bus.MemoryError.InstructionAccessFault) {
-                self.execute_buf.trap = riscv.Traps.InstructionAccessFault;
+                self.execute_buf.exception = riscv.ExceptionCause.InstructionAccessFault;
             }
-            self.fatalTrap = self.execute_buf.trap.?;
+            self.fatal_exception = self.execute_buf.exception.?;
             break :err 0;
         };
 
@@ -331,26 +393,22 @@ pub const Hart = struct {
 
     /// Handle traps set by the Hart
     fn handleTrap(self: *@This(), buf: *ExecuteBuffer) void {
-        if (buf.trap == null) return;
-        switch (buf.trap.?) {
-            .None => {},
-            .IllegalInstruction => {
-                self.fatalTrap = buf.trap.?;
+        // TODO finish
+        if (buf.exception == null) return;
+        switch (buf.exception.?) {
+            .InstructionAddressMisaligned, .InstructionAccessFault => {
+                self.fatal_exception = buf.exception.?;
             },
-            .EnvironmentCall => {},
-            .LoadAccessMisaligned => {},
+            .IllegalInstruction => {},
+            .Breakpoint => {},
+            .LoadAddressMisaligned => {},
             .LoadAccessFault => {},
-            .StoreAccessMisaligned => {},
+            .StoreAddressMisaligned => {},
             .StoreAccessFault => {},
-            .InstructionAccessFault => {
-                self.fatalTrap = buf.trap.?;
-            },
-            .InstructionAddressMisaligned => {
-                self.fatalTrap = buf.trap.?;
-            },
-            .Misc, _ => {
-                self.fatalTrap = buf.trap.?;
-            },
+            .EnvironmentCallUMode => {},
+            .EnvironmentCallMMode => {},
+            .EnvironmentCallSMode, .InstructionPageFault, .LoadPageFault, .StorePageFault, .DoubleTrap, .SoftwareCheck, .HardwareError => {}, // Should never happen
+            else => {}, // Should never happen
         }
     }
 
@@ -359,8 +417,7 @@ pub const Hart = struct {
         // After a branch or jump, the pipeline must be flushed, which invalidates instructions in the pipeline
         // that were not meant to be executed.
         if (self.flush > 0) {
-            buf.instruction = riscv.NOP;
-            buf.decoded = .{ .I = @bitCast(buf.instruction) };
+            buf.instruction = 0;
             buf.res = 0;
             buf.rd = 0;
             return;
@@ -397,7 +454,7 @@ pub const Hart = struct {
                         executeOp(self, buf);
                     },
                     else => {
-                        buf.trap = riscv.Traps.IllegalInstruction;
+                        buf.exception = .IllegalInstruction;
                     },
                 }
             },
@@ -421,7 +478,7 @@ pub const Hart = struct {
                         executeSystem(self, buf);
                     },
                     else => {
-                        buf.trap = riscv.Traps.IllegalInstruction;
+                        buf.exception = .IllegalInstruction;
                     },
                 }
             },
@@ -431,7 +488,7 @@ pub const Hart = struct {
                         executeMemoryAccess(self, buf);
                     },
                     else => {
-                        buf.trap = riscv.Traps.IllegalInstruction;
+                        buf.exception = .IllegalInstruction;
                     },
                 }
             },
@@ -441,7 +498,7 @@ pub const Hart = struct {
                         executeBranch(self, buf);
                     },
                     else => {
-                        buf.trap = riscv.Traps.IllegalInstruction;
+                        buf.exception = .IllegalInstruction;
                     },
                 }
             },
@@ -454,7 +511,7 @@ pub const Hart = struct {
                         executeAuipc(self, buf);
                     },
                     else => {
-                        buf.trap = riscv.Traps.IllegalInstruction;
+                        buf.exception = .IllegalInstruction;
                     },
                 }
             },
@@ -464,12 +521,12 @@ pub const Hart = struct {
                         executeJal(self, buf);
                     },
                     else => {
-                        buf.trap = riscv.Traps.IllegalInstruction;
+                        buf.exception = .IllegalInstruction;
                     },
                 }
             },
             .none => {
-                buf.trap = riscv.Traps.IllegalInstruction;
+                buf.exception = .IllegalInstruction;
             },
         }
     }
@@ -514,7 +571,7 @@ pub const Hart = struct {
                     // logical
                     buf.res = std.math.shr(u32, buf.op1, decoded.imm & 0x1F);
                 } else {
-                    buf.trap = riscv.Traps.IllegalInstruction;
+                    buf.exception = .IllegalInstruction;
                 }
             },
         }
@@ -541,7 +598,7 @@ pub const Hart = struct {
                 } else if (decoded.funct7 == 0b0100000) { // sub
                     buf.res -%= buf.op2;
                 } else {
-                    buf.trap = riscv.Traps.IllegalInstruction;
+                    buf.exception = .IllegalInstruction;
                 }
             },
             riscv.Funct3.OP.slt => {
@@ -577,7 +634,7 @@ pub const Hart = struct {
                     // logical
                     buf.res = std.math.shr(u32, buf.op1, buf.op2 & 0x1F);
                 } else {
-                    buf.trap = riscv.Traps.IllegalInstruction;
+                    buf.exception = .IllegalInstruction;
                 }
             },
         }
@@ -639,7 +696,7 @@ pub const Hart = struct {
                 }
             },
             else => {
-                buf.trap = riscv.Traps.IllegalInstruction;
+                buf.exception = .IllegalInstruction;
             },
         }
     }
@@ -655,7 +712,7 @@ pub const Hart = struct {
                         if (e == bus.MemoryError.LoadAccessFault) {
                             buf.trap = riscv.Traps.LoadAccessFault;
                         } else if (e == bus.MemoryError.IllegalInstruction) {
-                            buf.trap = riscv.Traps.IllegalInstruction;
+                            buf.exception = .IllegalInstruction;
                         }
                         break :err 0;
                     };
@@ -668,7 +725,7 @@ pub const Hart = struct {
                         if (e == bus.MemoryError.LoadAccessFault) {
                             buf.trap = riscv.Traps.LoadAccessFault;
                         } else if (e == bus.MemoryError.IllegalInstruction) {
-                            buf.trap = riscv.Traps.IllegalInstruction;
+                            buf.exception = .IllegalInstruction;
                         }
                         break :err 0;
                     };
@@ -681,13 +738,13 @@ pub const Hart = struct {
                         if (e == bus.MemoryError.LoadAccessFault) {
                             buf.trap = riscv.Traps.LoadAccessFault;
                         } else if (e == bus.MemoryError.IllegalInstruction) {
-                            buf.trap = riscv.Traps.IllegalInstruction;
+                            buf.exception = .IllegalInstruction;
                         }
                         break :err 0;
                     };
                 },
                 else => {
-                    buf.trap = riscv.Traps.IllegalInstruction;
+                    buf.exception = .IllegalInstruction;
                 },
             }
         } else if (decoded.opcode == @intFromEnum(riscv.Opcode.STORE)) {
@@ -698,7 +755,7 @@ pub const Hart = struct {
                         if (e == bus.MemoryError.StoreAccessFault) {
                             buf.trap = riscv.Traps.StoreAccessFault;
                         } else if (e == bus.MemoryError.IllegalInstruction) {
-                            buf.trap = riscv.Traps.IllegalInstruction;
+                            buf.exception = .IllegalInstruction;
                         }
                     };
                 },
@@ -707,7 +764,7 @@ pub const Hart = struct {
                         if (e == bus.MemoryError.StoreAccessFault) {
                             buf.trap = riscv.Traps.StoreAccessFault;
                         } else if (e == bus.MemoryError.IllegalInstruction) {
-                            buf.trap = riscv.Traps.IllegalInstruction;
+                            buf.exception = .IllegalInstruction;
                         }
                     };
                 },
@@ -716,12 +773,12 @@ pub const Hart = struct {
                         if (e == bus.MemoryError.StoreAccessFault) {
                             buf.trap = riscv.Traps.StoreAccessFault;
                         } else if (e == bus.MemoryError.IllegalInstruction) {
-                            buf.trap = riscv.Traps.IllegalInstruction;
+                            buf.exception = .IllegalInstruction;
                         }
                     };
                 },
                 else => {
-                    buf.trap = riscv.Traps.IllegalInstruction;
+                    buf.exception = .IllegalInstruction;
                 },
             }
         }
@@ -729,20 +786,53 @@ pub const Hart = struct {
 
     fn executeSystem(self: *@This(), buf: *ExecuteBuffer) void {
         const decoded = buf.decoded.I;
-        if (decoded.imm == 0) {
-            // ECALL
-            // TODO
-        } else if (decoded.imm == 1) {
-            // EBREAK
-            self.ebreak = true;
-        } else {
-            buf.trap = riscv.Traps.IllegalInstruction;
+        switch (decoded.funct3) {
+            riscv.Funct3.SYSTEM.priv => {
+                switch (decoded.imm) {
+                    riscv.SystemImmediates.ecall => {
+                        buf.exception = if (self.priv == .Machine) .EnvironmentCallMMode else .EnvironmentCallUMode;
+                    },
+                    riscv.SystemImmediates.ebreak => {
+                        self.ebreak = true;
+                        buf.exception = .Breakpoint;
+                    },
+                    riscv.SystemImmediates.mret => {
+                        if (self.priv != .Machine) {
+                            buf.exception = .IllegalInstruction;
+                        } else {
+                            self.priv = @enumFromInt(self.mstatus.mpp);
+                            self.next_pc = self.mepc;
+                            self.mstatus.mie = self.mstatus.mpie;
+                            self.mstatus.mpie = 1;
+                            self.mstatus.mpp = @intFromEnum(riscv.Priv.User);
+                            self.mstatus.verify();
+                        }
+                    },
+                    riscv.SystemImmediates.wfi => {
+                        // A legal implementation is to implement this as NOP
+                    },
+                    else => {
+                        buf.exception = .IllegalInstruction;
+                    },
+                }
+            },
+            riscv.Funct3.SYSTEM.csrrw => {}, // TODO
+            riscv.Funct3.SYSTEM.csrrs => {}, // TODO
+            riscv.Funct3.SYSTEM.csrrc => {}, // TODO
+            riscv.Funct3.SYSTEM.csrrwi => {}, // TODO
+            riscv.Funct3.SYSTEM.csrrsi => {}, // TODO
+            riscv.Funct3.SYSTEM.csrrci => {}, // TODO
+            else => {
+                buf.exception = .IllegalInstruction;
+            },
         }
     }
 
     /// Writes pipeline results to the register file
     fn writeback(self: *@This(), buf: *ExecuteBuffer) void {
         var rd: u5 = 0;
+        if (buf.instruction == 0) return;
+        self.minstret +%= 1;
         switch (buf.decoded) {
             .R => |value| {
                 rd = value.rd;

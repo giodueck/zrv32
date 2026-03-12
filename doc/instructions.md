@@ -274,6 +274,18 @@ I-Type:
           EBREAK             0      PRIV     0         SYSTEM
 ```
 
+### Trap Return
+
+I-Type:
+```
+31                    20 19     15 14 12 11      7 6           0
+┌─┬─┬─┬─┬─┬─┬─┬─┬─┬─┬─┬─┬─┬─┬─┬─┬─┬─┬─┬─┬─┬─┬─┬─┬─┬─┬─┬─┬─┬─┬─┬─┐
+│        imm[11:0]      │   rs1   │ f3  │   rd    │    opcode   │
+└─┴─┴─┴─┴─┴─┴─┴─┴─┴─┴─┴─┴─┴─┴─┴─┴─┴─┴─┴─┴─┴─┴─┴─┴─┴─┴─┴─┴─┴─┴─┴─┘
+            12               5       3       5           7
+           MRET              0      PRIV     0         SYSTEM
+```
+
 ### HINT Instructions
 
 Most effectively-NOP instructions are reserved for use as hints to the microarchitecture. These can safely be ingnored

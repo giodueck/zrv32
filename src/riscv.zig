@@ -136,6 +136,22 @@ pub const Funct3 = .{
         .sh  = 0b001,
         .sw  = 0b010,
     },
+    .SYSTEM = .{
+        .priv   = 0b000,
+        .csrrw  = 0b001,
+        .csrrs  = 0b010,
+        .csrrc  = 0b011,
+        .csrrwi = 0b101,
+        .csrrsi = 0b110,
+        .csrrci = 0b111,
+    }
+};
+
+pub const SystemImmediates = .{
+    .ecall = 0,
+    .ebreak = 1,
+    .mret = 0b0011000_00010,
+    .wfi = 0b0001000_00101,
 };
 // zig fmt: on
 
@@ -224,6 +240,171 @@ pub const Traps = enum(u4) {
     InstructionAddressMisaligned,
     Misc = 15,
     _,
+};
+
+pub const ExceptionCause = enum(u31) {
+    InstructionAddressMisaligned = 0,
+    InstructionAccessFault,
+    IllegalInstruction,
+    Breakpoint,
+    LoadAddressMisaligned,
+    LoadAccessFault,
+    StoreAddressMisaligned,
+    StoreAccessFault,
+    EnvironmentCallUMode,
+    EnvironmentCallSMode,
+    EnvironmentCallMMode = 11,
+    InstructionPageFault,
+    LoadPageFault,
+    StorePageFault = 15,
+    DoubleTrap,
+    SoftwareCheck = 18,
+    HardwareError,
+    // Some more custom and reserved
+    _,
+};
+
+// While I only plan to implement User and Machine, this is the full list
+pub const Priv = enum(u2) {
+    User = 0,
+    Supervisor = 1,
+    Reserved = 2,
+    Machine = 3,
+};
+
+/// CSR that keeps track of and controls the hart's current operating state.
+/// WPRI fields are to be preserved when writing and ignored when reading.
+pub const MStatus = packed struct(u32) {
+    /// WPRI
+    a: u1,
+    /// Supervisor interrupt enable
+    sie: u1,
+    /// WPRI
+    b: u1,
+    /// Machine interrupt enable
+    mie: u1,
+    /// WPRI
+    c: u1,
+    /// Supervisor previous interrupt enable
+    spie: u1,
+    /// User big endian
+    ube: u1,
+    /// Machine previous interrupt enable
+    mpie: u1,
+    /// Supervisor previous privilege
+    spp: u1,
+    /// Vector status
+    vs: u2,
+    /// Machine previous privilege
+    mpp: u2,
+    /// Floating-point status
+    fs: u2,
+    /// User extension status
+    xs: u2,
+    /// Modify (memory) privilege
+    mprv: u1,
+    /// Supervisor-user memory access
+    sum: u1,
+    /// Make executable (memory) readable
+    mxr: u1,
+    /// Trap virtual memory
+    tvm: u1,
+    /// Timeout wait (trap WFI)
+    tw: u1,
+    // Trap SRET
+    tsr: u1,
+    // S-Mode previous expected landing pad
+    spelp: u1,
+    /// S-Mode disable trap
+    sdt: u1,
+    /// WPRI
+    d: u6,
+    /// (F/V/X) State dirty
+    sd: u1,
+
+    /// Sets all read-only fields to their original values and verifies WARL fields
+    pub fn verify(self: *@This()) void {
+        // Some fields are read-only 0, e.g. Supervisor related ones
+        const RoZero = enum {
+            sie,
+            spie,
+            spp,
+            mprv, // because we don't implement this
+            sum,
+            mxr, // because we don't implement this
+            ube,
+            tvm,
+            tsr,
+            vs,
+            fs,
+            xs,
+            sd,
+            spelp,
+        };
+        inline for (@typeInfo(RoZero).@"enum".fields) |f| {
+            @field(self, f.name) = 0;
+        }
+
+        // Some fields have legal values
+        if (self.mpp != 0 and self.mpp != 3) self.mpp = 0;
+    }
+};
+
+/// CSR that keeps track of and controls the hart's current operating state.
+/// Generally contains the same fields the RV64 version has in its upper word.
+/// WPRI fields are to be preserved when writing and ignored when reading.
+pub const MStatusH = packed struct(u32) {
+    /// WPRI
+    a: u4,
+    /// Supervisor big endian
+    sbe: u1,
+    /// Machine big endian
+    mbe: u1,
+    /// Guest virtual address
+    gva: u1,
+    /// Machine previous virtualization mode
+    mpv: u1,
+    /// WPRI
+    b: u1,
+    // M-Mode previous expected landing pad
+    mpelp: u1,
+    /// M-Mode disable trap
+    mdt: u1,
+    /// WPRI
+    c: u21,
+
+    /// Sets all read-only fields to their original values and verifies WARL fields
+    pub fn verify(self: *@This()) void {
+        // Some fields are read-only 0, e.g. Supervisor related ones
+        const RoZero = enum {
+            sbe,
+            mbe,
+            mpelp,
+            gva,
+            mpv,
+        };
+        inline for (@typeInfo(RoZero).@"enum".fields) |f| {
+            @field(self, f.name) = 0;
+        }
+    }
+};
+
+pub const MTrapVector = packed struct(u32) {
+    /// Mode: Direct, vectored or reserved. In this implementation, hard-coded to direct
+    mode: u2,
+    /// Vector base address
+    base: u30,
+
+    /// Sets all read-only fields to their original values and verifies WARL fields
+    pub fn verify(self: *@This()) void {
+        // Some fields are read-only 0
+        const RoZero = enum {
+            mode
+        };
+        inline for (@typeInfo(RoZero).@"enum".fields) |f| {
+            @field(self, f.name) = 0;
+        }
+    }
 };
 
 /// Returns the I-Immediate generated from the instruction.
