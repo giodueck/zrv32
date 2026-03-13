@@ -12,3 +12,9 @@ output=quickfix
 command=zig build run
 cwd=<root>
 output=quickfix
+
+[build-release]
+command=zig build --release
+cwd=<root>
+output=quickfix
+

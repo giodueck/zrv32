@@ -1,7 +1,10 @@
 const std = @import("std");
 const clap = @import("clap");
+
 const Hart = @import("hart.zig").Hart;
 const riscv = @import("riscv.zig");
+
+const tui = @import("tui.zig");
 
 pub fn main() !u8 {
     var arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
@@ -19,6 +22,10 @@ pub fn main() !u8 {
             .names = .{ .short = 'h', .long = "help" },
         },
         .{
+            .id = 's',
+            .names = .{ .short = 's', .long = "stdout" },
+        },
+        .{
             // positional: boot program
             .id = 'b',
             .takes_value = .one,
@@ -32,14 +39,22 @@ pub fn main() !u8 {
 
     const usage_str =
         "Usage: zrv32 [-h|--help]\n" ++
-        "       zrv32 <binary boot executable> [<binary program executable>]\n";
+        "       zrv32 [options] <binary boot executable> [<binary program executable>]\n";
 
-    const help_str = usage_str ++ "\n" ++
+    const help_str = usage_str ++
+        "\n" ++
+        "This emulator implements the " ++ riscv.ISA ++ " instruction set." ++
+        "\n" ++
+        "\n" ++
         "<binary * executable> is an executable that contains purely Risc-V machine code.\n" ++
         "Unlike regular executable formats, like ELF, it should not contain a header.\n" ++
-        "A boot binary must be provided. A program binary may also be provided.\n\n" ++
+        "A boot binary must be provided. A program binary may be skipped.\n" ++
+        "\n" ++
         "Options:\n" ++
-        "   -h  --help      Print this help menu and exit\n\n";
+        "   -h  --help      Print this help menu and exit\n" ++
+        "   -s  --stdout    Use basic stdout output. This mode only supports running the\n" ++
+        "                   emulator until a breakpoint is hit in Machine mode.\n" ++
+        "\n";
 
     var iter = try std.process.ArgIterator.initWithAllocator(allocator);
     defer iter.deinit();
@@ -61,6 +76,7 @@ pub fn main() !u8 {
     defer hart.deinit();
     var boot_loaded = false;
     var program_loaded = false;
+    var stdout_mode = false;
 
     // We use the streaming parser, so we consume each argument individually
     while (cla_parser.next() catch |err| {
@@ -77,6 +93,9 @@ pub fn main() !u8 {
                 try stderr.writeAll(help_str);
                 try stderr.flush();
                 return 0;
+            },
+            's' => {
+                stdout_mode = true;
             },
             'b' => {
                 var fd = try std.fs.cwd().openFile(arg.value.?, .{ .mode = .read_only });
@@ -120,22 +139,26 @@ pub fn main() !u8 {
     // Command-line argument parsing done
 
     if (!boot_loaded) {
-        try stderr.print("Error: No boot binary program loaded, aborting\n\n", .{});
+        try stderr.print("Error: No boot binary program loaded, aborting\n", .{});
         try stderr.writeAll(usage_str);
         try stderr.flush();
         return 1;
     }
     if (!program_loaded) {
-        try stderr.print("Warning: No program binary loaded\n\n", .{});
+        try stderr.print("Warning: No program binary loaded\n", .{});
         try stderr.flush();
     }
 
-    // Run emulator starting at boot binary until ebreak is hit
-    while (!hart.ebreak and hart.fatal_exception == null) {
-        hart.step();
-    }
+    if (stdout_mode) {
+        // Run emulator starting at boot binary until Machine mode ebreak is hit or an exception is triggered without a handler defined.
+        while (!hart.ebreak and hart.fatal_exception == null) {
+            hart.step();
+        }
 
-    hart.printState();
+        hart.printState();
+    } else {
+        try tui.tuiMain(allocator, &hart);
+    }
 
     // API needs:
     //  - Load program

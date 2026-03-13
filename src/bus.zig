@@ -45,9 +45,15 @@
 
 const std = @import("std");
 
+const chardev = @import("chardev.zig");
+
 pub const RamStart: u32 = 0x0004_0000;
 // 64KB of main memory
 pub const RamSize: u32 = 0x1_0000;
+
+pub const MmioStart: u32 = 0x0001_0000;
+// 64KB of memory mapped I/O
+pub const MmioSize: u32 = 0x1_0000;
 
 pub const ProgramRomStart: u32 = 0x0000_2000;
 // 24KB of program ROM
@@ -61,6 +67,7 @@ const AccessControl = struct {
     read: bool = false,
     write: bool = false,
     execute: bool = false,
+    io: bool = false,
 };
 
 pub const MemoryError = error{
@@ -92,6 +99,16 @@ const MemoryMap = .{
         .size = ProgramRomSize,
     },
     .{
+        .name = "Memory mapped I/O",
+        .access = AccessControl{
+            .read = true,
+            .write = true,
+            .io = true,
+        },
+        .start = MmioStart,
+        .size = MmioSize,
+    },
+    .{
         .name = "Dynamic RAM",
         .access = AccessControl{
             .read = true,
@@ -100,6 +117,11 @@ const MemoryMap = .{
         .start = RamStart,
         .size = RamSize,
     },
+};
+
+const Devices = enum(u32) {
+    CharDev = 0x1_0000,
+    _,
 };
 
 pub const Bus = struct {
@@ -116,17 +138,24 @@ pub const Bus = struct {
     boot_rom_start: u32 = BootRomStart,
     boot_rom_size: u32 = BootRomSize,
 
+    chardev: chardev.CharDev = undefined,
+
     pub fn init(self: *@This(), allocator: std.mem.Allocator) !void {
         self.allocator = allocator;
         self.boot_rom = try self.allocator.alloc(u8, BootRomSize);
         self.program_rom = try self.allocator.alloc(u8, ProgramRomSize);
         self.ram = try self.allocator.alloc(u8, RamSize);
+        self.chardev.init(null);
     }
 
     pub fn deinit(self: @This()) void {
         self.allocator.free(self.ram);
         self.allocator.free(self.program_rom);
         self.allocator.free(self.boot_rom);
+    }
+
+    pub fn setCharDevWriter(self: *@This(), writer: *std.io.Writer) void {
+        self.chardev.init(writer);
     }
 
     /// Set a single byte.
@@ -191,8 +220,19 @@ pub const Bus = struct {
             const range = @field(MemoryMap, field.name);
 
             if (addr >= range.start and addr < range.start + range.size and range.access.write) {
-                for (0..width) |i| {
-                    self.setb(addr +% @as(u32, @intCast(i)), @truncate(value >> @intCast(8 * i)));
+                if (range.access.io) {
+                    switch (@as(Devices, @enumFromInt(addr))) {
+                        _ => {
+                            return MemoryError.StoreAccessFault;
+                        },
+                        .CharDev => {
+                            self.chardev.store(addr, value, width);
+                        },
+                    }
+                } else {
+                    for (0..width) |i| {
+                        self.setb(addr +% @as(u32, @intCast(i)), @truncate(value >> @intCast(8 * i)));
+                    }
                 }
                 return;
             }
@@ -248,8 +288,19 @@ pub const Bus = struct {
             const range = @field(MemoryMap, field.name);
 
             if (addr >= range.start and addr < range.start + range.size and range.access.read) {
-                for (0..width) |i| {
-                    ret |= @as(u32, self.getb(addr +% @as(u32, @truncate(i)))) << (8 * @as(u5, @truncate(i)));
+                if (range.access.io) {
+                    switch (@as(Devices, @enumFromInt(addr))) {
+                        _ => {
+                            return MemoryError.LoadAccessFault;
+                        },
+                        .CharDev => {
+                            return self.chardev.load(addr, width);
+                        },
+                    }
+                } else {
+                    for (0..width) |i| {
+                        ret |= @as(u32, self.getb(addr +% @as(u32, @truncate(i)))) << (8 * @as(u5, @truncate(i)));
+                    }
                 }
                 return ret;
             }

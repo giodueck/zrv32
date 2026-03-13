@@ -305,6 +305,58 @@ pub const Hart = struct {
         }
     }
 
+    /// Debugging method to print the current Hart state to an allocated string
+    pub fn allocPrintState(self: @This(), allocator: std.mem.Allocator) ![]u8 {
+        var lines = std.ArrayList([]u8).empty;
+        defer lines.deinit(allocator);
+        defer {
+            for (lines.items) |line| {
+                allocator.free(line);
+            }
+        }
+
+        try lines.append(allocator, try std.fmt.allocPrint(allocator, "pc: 0x{x:0>8}\n", .{self.pc}));
+        const register_names = comptime a: {
+            var names: [32][]const u8 = undefined;
+            for (@typeInfo(@TypeOf(riscv.RegisterNames)).@"struct".fields, 0..) |f, i| {
+                names[i] = f.name;
+            }
+            break :a names;
+        };
+        const register_aliases = comptime a: {
+            var names: [32][]const u8 = undefined;
+            for (@typeInfo(@TypeOf(riscv.RegisterAliases)).@"struct".fields, 0..) |f, i| {
+                names[i] = f.name;
+            }
+            break :a names;
+        };
+        for (0..16) |i| {
+            try lines.append(allocator, try std.fmt.allocPrint(allocator, "{s: >4} ({s: >3}) 0x{x:08} | {s: >4} ({s: >3}) 0x{x:08}\n", .{ register_aliases[i * 2], register_names[i * 2], self.registers[i * 2], register_aliases[i * 2 + 1], register_names[i * 2 + 1], self.registers[i * 2 + 1] }));
+        }
+        try lines.append(allocator, try std.fmt.allocPrint(allocator, "\n(priv) = {d} {s}\n", .{ @intFromEnum(self.priv), @tagName(self.priv) }));
+        const mpp = @as(riscv.Priv, @enumFromInt(self.mstatus.mpp));
+        try lines.append(allocator, try std.fmt.allocPrint(allocator, "mstatus = 0x{x:08} (MPP = {d} {s})\n", .{ @as(u32, @bitCast(self.mstatus)), @intFromEnum(mpp), @tagName(mpp) }));
+        try lines.append(allocator, try std.fmt.allocPrint(allocator, "mscratch = 0x{x:08}\n", .{self.mscratch}));
+        try lines.append(allocator, try std.fmt.allocPrint(allocator, "mtvec = 0x{x:08}\n", .{@as(u32, @bitCast(self.mtvec))}));
+        try lines.append(allocator, try std.fmt.allocPrint(allocator, "mepc = 0x{x:08} | mtval = 0x{x:08}\n", .{ self.mepc, self.mtval }));
+        try lines.append(allocator, try std.fmt.allocPrint(allocator, "mcause = 0x{x:08}", .{self.mcause}));
+        if (self.mtval != 0) try lines.append(allocator, try std.fmt.allocPrint(allocator, " ({s})", .{@tagName(@as(riscv.ExceptionCause, @enumFromInt(self.mcause)))}));
+        try lines.append(allocator, try std.fmt.allocPrint(allocator, "\n", .{}));
+        try lines.append(allocator, try std.fmt.allocPrint(allocator, "cycle = 0x{x:016}\n", .{self.mcycle}));
+        try lines.append(allocator, try std.fmt.allocPrint(allocator, "instret = 0x{x:016}\n", .{self.minstret}));
+
+        var count: usize = 0;
+        for (lines.items) |line| {
+            count += line.len;
+        }
+        const buf = try allocator.alloc(u8, count);
+        var ret = std.ArrayList(u8).initBuffer(buf);
+        for (lines.items) |line| {
+            ret.appendSliceAssumeCapacity(line);
+        }
+        return buf;
+    }
+
     // Emulation methods
 
     /// Sets the register rn to the value val, then sets x0 to 0.

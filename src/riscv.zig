@@ -1,5 +1,7 @@
 const std = @import("std");
 
+pub const ISA = "RV32I_Zicsr";
+
 // zig fmt: off
 pub const RTypeInstruction = packed struct(u32) {
     opcode: u7,
