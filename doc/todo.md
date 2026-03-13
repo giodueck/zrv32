@@ -27,14 +27,14 @@
     - [x] sw, sh, sb
 - [x] Memory ordering
     this is just a NOP
-- [ ] Environment call and Breakpoints
+- [x] Environment call and Breakpoints
     - [x] ebreak
-    - [ ] priv
-    - [ ] zicsr
+    - [x] priv
+    - [x] zicsr
 
 ## Extensions
 
-- [ ] Zicsr extension (and machine/user mode privilege)
+- [x] Zicsr extension (and machine/user mode privilege)
 - [ ] M extension
 
 ## Interactive emulator

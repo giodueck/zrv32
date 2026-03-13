@@ -7,17 +7,20 @@ const riscv = @import("riscv.zig");
 /// Keeps the result of the last Fetch operation
 const FetchBuffer = struct {
     instruction: u32 = 0,
+    pc: u32 = 0,
 };
 
 /// Keeps the result of the last Decode operation
 const DecodeBuffer = struct {
     instruction: u32 = 0,
+    pc: u32 = 0,
     decoded: riscv.InstructionUnion = .{ .none = @as(void, undefined) },
 };
 
 /// Keeps the result of the last Read Registers operation
 const ReadRegistersBuffer = struct {
     instruction: u32 = 0,
+    pc: u32 = 0,
     decoded: riscv.InstructionUnion = .{ .none = @as(void, undefined) },
     op1: u32 = 0,
     op2: u32 = 0,
@@ -27,6 +30,7 @@ const ReadRegistersBuffer = struct {
 /// Keeps the result of the last Execute operation
 const ExecuteBuffer = struct {
     instruction: u32 = 0,
+    pc: u32 = 0,
     decoded: riscv.InstructionUnion = .{ .none = @as(void, undefined) },
     op1: u32 = 0,
     op2: u32 = 0,
@@ -61,20 +65,23 @@ pub const Hart = struct {
     priv: riscv.Priv = .Machine,
 
     // Control and status registers
-    mstatus: riscv.MStatus = std.mem.zeroes(riscv.MStatus),
-    mstatush: riscv.MStatusH = std.mem.zeroes(riscv.MStatusH),
-    mtvec: riscv.MTrapVector = std.mem.zeroes(riscv.MTrapVector),
-    // Reads and writes are divided into mcycle and mcycleh
-    // cycle is a read-only shadow of this register
+    /// Reads and writes are divided into mcycle and mcycleh
+    /// cycle is a read-only shadow of this register
     mcycle: u64 = 0,
-    // Reads and writes are divided into minstret and minstreth
-    // instret is a read-only shadow of this register
+    /// Reads and writes are divided into mtime and mtimeh
+    /// time is a read-only shadow of this register
+    time: u64 = 0,
+    /// Reads and writes are divided into minstret and minstreth
+    /// instret is a read-only shadow of this register
     minstret: u64 = 0,
-    // All hardware performance counters and events are read-only 0, and time will not be implemented.
-    // Access to cycle and instret in user-mode is forbidden, so this is read-only 0 as well.
-    mcounteren: u32 = 0,
-    // Also read-only 0.
-    mcounterinhibit: u32 = 0,
+    /// Current Hart status
+    mstatus: riscv.MStatus = std.mem.zeroes(riscv.MStatus),
+    /// Current Hart status, high 32 bits
+    mstatush: riscv.MStatusH = std.mem.zeroes(riscv.MStatusH),
+    /// Trap vector address
+    mtvec: riscv.MTrapVector = std.mem.zeroes(riscv.MTrapVector),
+    /// Controls which counters are available in U-Mode. Attempts to access disabled counters trigger an illegal instruction exception
+    mcounteren: u32 = 7,
     /// Scratch register for dedicated M-mode use
     mscratch: u32 = 0,
     /// Machine exception PC
@@ -83,12 +90,6 @@ pub const Hart = struct {
     mcause: u32 = 0,
     /// When a machine trap is taken, mtval is either set to exception-specific information or 0
     mtval: u32 = 0,
-    /// Machine config pointer, unimplemented so read-only 0
-    mconfigptr: u32 = 0,
-    /// Machine environment configuration, controls memory ordering which is a noop, so read-only 0
-    menvcfg: u32 = 0,
-    /// Machine environment configuration, controls memory ordering which is a noop, so read-only 0
-    menvcfgh: u32 = 0,
 
     // Pipeline buffers
     fetch_buf: FetchBuffer = .{},
@@ -105,6 +106,18 @@ pub const Hart = struct {
     pub fn init(self: *@This(), allocator: std.mem.Allocator) !void {
         self.allocator = allocator;
         try self.bus.init(self.allocator);
+        self.reset();
+    }
+
+    pub fn deinit(self: @This()) void {
+        self.bus.deinit();
+    }
+
+    pub fn reset(self: *@This()) void {
+        self.fetch_buf = FetchBuffer{};
+        self.decode_buf = DecodeBuffer{};
+        self.read_registers_buf = ReadRegistersBuffer{};
+        self.execute_buf = ExecuteBuffer{};
         self.priv = .Machine;
         self.pc = self.bus.boot_rom_start;
         self.flush = 3;
@@ -113,20 +126,13 @@ pub const Hart = struct {
         self.mstatush.mdt = 1;
         self.mtvec = std.mem.zeroes(riscv.MTrapVector);
         self.mcycle = 0;
+        self.time = 0;
         self.minstret = 0;
-        self.mcounteren = 0;
-        self.mcounterinhibit = 0;
+        self.mcounteren = 7;
         self.mscratch = 0;
         self.mepc = 0;
         self.mcause = 0;
         self.mtval = 0;
-        self.mconfigptr = 0;
-        self.menvcfg = 0;
-        self.menvcfgh = 0;
-    }
-
-    pub fn deinit(self: @This()) void {
-        self.bus.deinit();
     }
 
     // Testing methods
@@ -283,8 +289,19 @@ pub const Hart = struct {
         for (0..16) |i| {
             std.debug.print("{s: >4} ({s: >3}) 0x{x:08} | {s: >4} ({s: >3}) 0x{x:08}\n", .{ register_aliases[i * 2], register_names[i * 2], self.registers[i * 2], register_aliases[i * 2 + 1], register_names[i * 2 + 1], self.registers[i * 2 + 1] });
         }
+        std.debug.print("\n(priv) = {d} {s}\n", .{ @intFromEnum(self.priv), @tagName(self.priv) });
+        const mpp = @as(riscv.Priv, @enumFromInt(self.mstatus.mpp));
+        std.debug.print("mstatus = 0x{x:08} (MPP = {d} {s})\n", .{ @as(u32, @bitCast(self.mstatus)), @intFromEnum(mpp), @tagName(mpp) });
+        std.debug.print("mscratch = 0x{x:08}\n", .{self.mscratch});
+        std.debug.print("mtvec = 0x{x:08}\n", .{@as(u32, @bitCast(self.mtvec))});
+        std.debug.print("mepc = 0x{x:08} | mtval = 0x{x:08}\n", .{ self.mepc, self.mtval });
+        std.debug.print("mcause = 0x{x:08}", .{self.mcause});
+        if (self.mtval != 0) std.debug.print(" ({s})", .{@tagName(@as(riscv.ExceptionCause, @enumFromInt(self.mcause)))});
+        std.debug.print("\n", .{});
+        std.debug.print("cycle = 0x{x:016}\n", .{self.mcycle});
+        std.debug.print("instret = 0x{x:016}\n", .{self.minstret});
         if (self.fatal_exception != null) {
-            std.debug.print("Fatal trap: {any}\n", .{self.fatal_exception.?});
+            std.debug.print("\nError: Fatal unhandled exception\n", .{});
         }
     }
 
@@ -296,24 +313,30 @@ pub const Hart = struct {
         self.registers[0] = 0;
     }
 
+    /// Convenience function for branching (and not forgetting to flush!)
+    fn setPc(self: *@This(), new_pc: u32) void {
+        self.next_pc = new_pc;
+        self.flush = 4;
+    }
+
     /// Run a single cycle of the CPU, advancing each pipeline stage once
     pub fn step(self: *@This()) void {
+        if (self.fatal_exception != null) return;
+
         self.next_pc = self.pc +% 4;
-        defer self.pc = self.next_pc;
-        defer self.mcycle +%= 1;
 
         // Pipeline detail: writeback needs to finish before reading registers begins.
         // Since we want to use all buffers before writing to them, we do them in reverse order anyways
 
         // 5. Writeback
-        self.writeback(&self.execute_buf);
+        self.writeback(self.execute_buf);
 
         // 5. pt 2 Trap handling
-        self.handleTrap(&self.execute_buf);
-        if (self.fatal_exception != null) return;
+        self.handleException(&self.execute_buf);
 
         // 4. Execute and Memory access
         self.execute_buf.instruction = self.read_registers_buf.instruction;
+        self.execute_buf.pc = self.read_registers_buf.pc;
         self.execute_buf.decoded = self.read_registers_buf.decoded;
         self.execute_buf.op1 = self.read_registers_buf.op1;
         self.execute_buf.op2 = self.read_registers_buf.op2;
@@ -326,11 +349,13 @@ pub const Hart = struct {
 
         // 3. Read registers
         self.read_registers_buf.instruction = self.decode_buf.instruction;
+        self.read_registers_buf.pc = self.decode_buf.pc;
         self.read_registers_buf.decoded = self.decode_buf.decoded;
         self.readRegisters(&self.read_registers_buf);
 
         // 2. Decode
         self.decode_buf.instruction = self.fetch_buf.instruction;
+        self.decode_buf.pc = self.fetch_buf.pc;
         const decode_r: riscv.RTypeInstruction = @bitCast(self.decode_buf.instruction);
         const decode_ins_type = riscv.Opcode.getType(@enumFromInt(decode_r.opcode));
         switch (decode_ins_type) {
@@ -353,8 +378,11 @@ pub const Hart = struct {
             self.fatal_exception = self.execute_buf.exception.?;
             break :err 0;
         };
+        self.fetch_buf.pc = self.pc;
 
         self.flush -|= 1;
+        self.pc = self.next_pc;
+        self.updateCounters(self.execute_buf);
     }
 
     /// Reads the needed registers into the Read Registers step buffer.
@@ -391,25 +419,25 @@ pub const Hart = struct {
         }
     }
 
-    /// Handle traps set by the Hart
-    fn handleTrap(self: *@This(), buf: *ExecuteBuffer) void {
-        // TODO finish
+    /// Handle exceptions set by the Hart
+    fn handleException(self: *@This(), buf: *ExecuteBuffer) void {
         if (buf.exception == null) return;
-        switch (buf.exception.?) {
-            .InstructionAddressMisaligned, .InstructionAccessFault => {
-                self.fatal_exception = buf.exception.?;
-            },
-            .IllegalInstruction => {},
-            .Breakpoint => {},
-            .LoadAddressMisaligned => {},
-            .LoadAccessFault => {},
-            .StoreAddressMisaligned => {},
-            .StoreAccessFault => {},
-            .EnvironmentCallUMode => {},
-            .EnvironmentCallMMode => {},
-            .EnvironmentCallSMode, .InstructionPageFault, .LoadPageFault, .StorePageFault, .DoubleTrap, .SoftwareCheck, .HardwareError => {}, // Should never happen
-            else => {}, // Should never happen
+        // Breakpoints in machine mode stop the emulator
+        if (buf.exception.? == .Breakpoint and self.priv == .Machine) {
+            self.ebreak = true;
+            return;
         }
+        // If no trap vector was set, all exceptions halt execution
+        if (self.mtvec.base == 0) self.fatal_exception = buf.exception.?;
+
+        self.mepc = buf.pc;
+        self.mtval = buf.instruction;
+        self.mstatus.mpp = @intFromEnum(self.priv);
+        self.priv = .Machine;
+        self.mcause = @intFromEnum(buf.exception.?);
+        self.setPc(@as(u32, @bitCast(self.mtvec)) & 0xFFFF_FFFC);
+        // Exception handled
+        buf.exception = null;
     }
 
     /// Executes the instruction
@@ -641,58 +669,50 @@ pub const Hart = struct {
     }
 
     fn executeJal(self: *@This(), buf: *ExecuteBuffer) void {
-        buf.res = self.pc -% 12 +% 4;
-        self.next_pc = self.pc -% 12 +% riscv.getJImmediate(buf.instruction);
-        self.flush = 4;
+        buf.res = buf.pc +% 4;
+        self.setPc(buf.pc +% riscv.getJImmediate(buf.instruction));
     }
 
     fn executeJalr(self: *@This(), buf: *ExecuteBuffer) void {
-        buf.res = self.pc -% 12 +% 4;
-        self.next_pc = riscv.getIImmediate(buf.instruction) +% buf.op1;
-        self.flush = 4;
+        buf.res = buf.pc +% 4;
+        self.setPc(riscv.getIImmediate(buf.instruction) +% buf.op1);
     }
 
     fn executeBranch(self: *@This(), buf: *ExecuteBuffer) void {
-        const dest = self.pc -% 12 +% riscv.getBImmediate(buf.instruction);
+        const dest = buf.pc +% riscv.getBImmediate(buf.instruction);
         switch (buf.decoded.B.funct3) {
             riscv.Funct3.BRANCH.beq => {
                 if (buf.op1 == buf.op2) {
-                    self.next_pc = dest;
-                    self.flush = 4;
+                    self.setPc(dest);
                 }
             },
             riscv.Funct3.BRANCH.bne => {
                 if (buf.op1 != buf.op2) {
-                    self.next_pc = dest;
-                    self.flush = 4;
+                    self.setPc(dest);
                 }
             },
             riscv.Funct3.BRANCH.blt => {
                 const rs1: i32 = @bitCast(buf.op1);
                 const rs2: i32 = @bitCast(buf.op2);
                 if (rs1 < rs2) {
-                    self.next_pc = dest;
-                    self.flush = 4;
+                    self.setPc(dest);
                 }
             },
             riscv.Funct3.BRANCH.bge => {
                 const rs1: i32 = @bitCast(buf.op1);
                 const rs2: i32 = @bitCast(buf.op2);
                 if (rs1 >= rs2) {
-                    self.next_pc = dest;
-                    self.flush = 4;
+                    self.setPc(dest);
                 }
             },
             riscv.Funct3.BRANCH.bltu => {
                 if (buf.op1 < buf.op2) {
-                    self.next_pc = dest;
-                    self.flush = 4;
+                    self.setPc(dest);
                 }
             },
             riscv.Funct3.BRANCH.bgeu => {
                 if (buf.op1 >= buf.op2) {
-                    self.next_pc = dest;
-                    self.flush = 4;
+                    self.setPc(dest);
                 }
             },
             else => {
@@ -789,26 +809,25 @@ pub const Hart = struct {
         switch (decoded.funct3) {
             riscv.Funct3.SYSTEM.priv => {
                 switch (decoded.imm) {
-                    riscv.SystemImmediates.ecall => {
+                    riscv.PrivImmediates.ecall => {
                         buf.exception = if (self.priv == .Machine) .EnvironmentCallMMode else .EnvironmentCallUMode;
                     },
-                    riscv.SystemImmediates.ebreak => {
-                        self.ebreak = true;
+                    riscv.PrivImmediates.ebreak => {
                         buf.exception = .Breakpoint;
                     },
-                    riscv.SystemImmediates.mret => {
+                    riscv.PrivImmediates.mret => {
                         if (self.priv != .Machine) {
                             buf.exception = .IllegalInstruction;
                         } else {
                             self.priv = @enumFromInt(self.mstatus.mpp);
-                            self.next_pc = self.mepc;
                             self.mstatus.mie = self.mstatus.mpie;
                             self.mstatus.mpie = 1;
                             self.mstatus.mpp = @intFromEnum(riscv.Priv.User);
                             self.mstatus.verify();
+                            self.setPc(self.mepc);
                         }
                     },
-                    riscv.SystemImmediates.wfi => {
+                    riscv.PrivImmediates.wfi => {
                         // A legal implementation is to implement this as NOP
                     },
                     else => {
@@ -816,23 +835,289 @@ pub const Hart = struct {
                     },
                 }
             },
-            riscv.Funct3.SYSTEM.csrrw => {}, // TODO
-            riscv.Funct3.SYSTEM.csrrs => {}, // TODO
-            riscv.Funct3.SYSTEM.csrrc => {}, // TODO
-            riscv.Funct3.SYSTEM.csrrwi => {}, // TODO
-            riscv.Funct3.SYSTEM.csrrsi => {}, // TODO
-            riscv.Funct3.SYSTEM.csrrci => {}, // TODO
+            riscv.Funct3.SYSTEM.csrrw => {
+                if (buf.rd != 0) buf.res = self.readCsr(@bitCast(decoded.imm)) catch a: {
+                    buf.exception = .IllegalInstruction;
+                    break :a 0;
+                };
+                self.writeCsr(@bitCast(decoded.imm), buf.op1, .write) catch {
+                    buf.exception = .IllegalInstruction;
+                };
+            },
+            riscv.Funct3.SYSTEM.csrrs => {
+                if (buf.rd != 0) buf.res = self.readCsr(@bitCast(decoded.imm)) catch a: {
+                    buf.exception = .IllegalInstruction;
+                    break :a 0;
+                };
+                self.writeCsr(@bitCast(decoded.imm), buf.op1, .set) catch {
+                    buf.exception = .IllegalInstruction;
+                };
+            },
+            riscv.Funct3.SYSTEM.csrrc => {
+                if (buf.rd != 0) buf.res = self.readCsr(@bitCast(decoded.imm)) catch a: {
+                    buf.exception = .IllegalInstruction;
+                    break :a 0;
+                };
+                self.writeCsr(@bitCast(decoded.imm), buf.op1, .clear) catch {
+                    buf.exception = .IllegalInstruction;
+                };
+            },
+            riscv.Funct3.SYSTEM.csrrwi => {
+                if (buf.rd != 0) buf.res = self.readCsr(@bitCast(decoded.imm)) catch a: {
+                    buf.exception = .IllegalInstruction;
+                    break :a 0;
+                };
+                if (decoded.rs1 != 0) self.writeCsr(@bitCast(decoded.imm), decoded.rs1, .write) catch {
+                    buf.exception = .IllegalInstruction;
+                };
+            },
+            riscv.Funct3.SYSTEM.csrrsi => {
+                if (buf.rd != 0) buf.res = self.readCsr(@bitCast(decoded.imm)) catch a: {
+                    buf.exception = .IllegalInstruction;
+                    break :a 0;
+                };
+                if (decoded.rs1 != 0) self.writeCsr(@bitCast(decoded.imm), decoded.rs1, .set) catch {
+                    buf.exception = .IllegalInstruction;
+                };
+            },
+            riscv.Funct3.SYSTEM.csrrci => {
+                if (buf.rd != 0) buf.res = self.readCsr(@bitCast(decoded.imm)) catch a: {
+                    buf.exception = .IllegalInstruction;
+                    break :a 0;
+                };
+                if (decoded.rs1 != 0) self.writeCsr(@bitCast(decoded.imm), decoded.rs1, .clear) catch {
+                    buf.exception = .IllegalInstruction;
+                };
+            },
             else => {
                 buf.exception = .IllegalInstruction;
             },
         }
     }
 
+    /// Returns the value of the CSR at the address. If access is forbidden or the CSR does not exist, errors with illegal instruction
+    fn readCsr(self: @This(), addr: u12) riscv.Exception!u32 {
+        switch (@as(riscv.CsrNumber, @enumFromInt(addr))) {
+            _ => {
+                return riscv.Exception.IllegalInstruction;
+            },
+            else => |number| {
+                const priv: riscv.CsrPriv = riscv.CsrPrivs.get(number).?;
+                if (@intFromEnum(self.priv) < @intFromEnum(priv.priv)) {
+                    return riscv.Exception.IllegalInstruction;
+                } else if (priv.zero) {
+                    return 0;
+                }
+
+                switch (number) {
+                    .cycle, .mcycle => {
+                        return @truncate(self.mcycle);
+                    },
+                    .cycleh, .mcycleh => {
+                        return @truncate(self.mcycle >> 32);
+                    },
+                    .time => {
+                        return @truncate(self.time);
+                    },
+                    .timeh => {
+                        return @truncate(self.time >> 32);
+                    },
+                    .instret, .minstret => {
+                        return @truncate(self.minstret);
+                    },
+                    .instreth, .minstreth => {
+                        return @truncate(self.minstret >> 32);
+                    },
+                    .mstatus => {
+                        return @bitCast(self.mstatus);
+                    },
+                    .mstatush => {
+                        return @bitCast(self.mstatush);
+                    },
+                    .mtvec => {
+                        return @bitCast(self.mtvec);
+                    },
+                    .mcounteren => {
+                        return self.mcounteren;
+                    },
+                    .mscratch => {
+                        return self.mscratch;
+                    },
+                    .mepc => {
+                        return self.mepc;
+                    },
+                    .mcause => {
+                        return self.mcause;
+                    },
+                    .mtval => {
+                        return self.mtval;
+                    },
+                    else => unreachable,
+                }
+            },
+        }
+    }
+
+    /// Sets the value of the CSR at the address. If access is forbidden or the CSR does not exist, errors with illegal instruction
+    fn writeCsr(self: *@This(), addr: u12, value: u32, op: enum { write, set, clear }) riscv.Exception!void {
+        switch (@as(riscv.CsrNumber, @enumFromInt(addr))) {
+            _ => {
+                return riscv.Exception.IllegalInstruction;
+            },
+            else => |number| {
+                const priv: riscv.CsrPriv = riscv.CsrPrivs.get(number).?;
+                if (@intFromEnum(self.priv) < @intFromEnum(priv.priv) or !priv.write) {
+                    return riscv.Exception.IllegalInstruction;
+                } else if (priv.zero) {
+                    return;
+                }
+
+                switch (number) {
+                    .mcycle => {
+                        if (op == .write) {
+                            self.mcycle &= 0xFFFF_FFFF_0000_0000;
+                            self.mcycle |= value;
+                        } else if (op == .set) {
+                            self.mcycle |= value;
+                        } else {
+                            self.mcycle &= ~value;
+                        }
+                    },
+                    .mcycleh => {
+                        if (op == .write) {
+                            self.mcycle &= 0xFFFF_FFFF;
+                            self.mcycle |= @as(u64, value) << 32;
+                        } else if (op == .set) {
+                            self.mcycle |= @as(u64, value) << 32;
+                        } else {
+                            self.mcycle &= ~@as(u64, value) << 32;
+                        }
+                    },
+                    .time => {
+                        if (op == .write) {
+                            self.time &= 0xFFFF_FFFF_0000_0000;
+                            self.time |= value;
+                        } else if (op == .set) {
+                            self.time |= value;
+                        } else {
+                            self.time &= ~value;
+                        }
+                    },
+                    .timeh => {
+                        if (op == .write) {
+                            self.time &= 0xFFFF_FFFF;
+                            self.time |= @as(u64, value) << 32;
+                        } else if (op == .set) {
+                            self.time |= @as(u64, value) << 32;
+                        } else {
+                            self.time &= ~@as(u64, value) << 32;
+                        }
+                    },
+                    .minstret => {
+                        if (op == .write) {
+                            self.minstret &= 0xFFFF_FFFF_0000_0000;
+                            self.minstret |= value;
+                        } else if (op == .set) {
+                            self.minstret |= value;
+                        } else {
+                            self.minstret &= ~value;
+                        }
+                    },
+                    .minstreth => {
+                        if (op == .write) {
+                            self.minstret &= 0xFFFF_FFFF;
+                            self.minstret |= @as(u64, value) << 32;
+                        } else if (op == .set) {
+                            self.minstret |= @as(u64, value) << 32;
+                        } else {
+                            self.minstret &= ~@as(u64, value) << 32;
+                        }
+                    },
+                    .mstatus => {
+                        if (op == .write) {
+                            self.mstatus = @bitCast(value);
+                        } else if (op == .set) {
+                            self.mstatus = @bitCast(@as(u32, @bitCast(self.mstatus)) | value);
+                        } else {
+                            self.mstatus = @bitCast(@as(u32, @bitCast(self.mstatus)) & ~value);
+                        }
+                        self.mstatus.verify();
+                    },
+                    .mstatush => {
+                        if (op == .write) {
+                            self.mstatush = @bitCast(value);
+                        } else if (op == .set) {
+                            self.mstatush = @bitCast(@as(u32, @bitCast(self.mstatush)) | value);
+                        } else {
+                            self.mstatush = @bitCast(@as(u32, @bitCast(self.mstatush)) & ~value);
+                        }
+                        self.mstatush.verify();
+                    },
+                    .mtvec => {
+                        if (op == .write) {
+                            self.mtvec = @bitCast(value);
+                        } else if (op == .set) {
+                            self.mtvec = @bitCast(@as(u32, @bitCast(self.mtvec)) | value);
+                        } else {
+                            self.mtvec = @bitCast(@as(u32, @bitCast(self.mtvec)) & ~value);
+                        }
+                        self.mtvec.verify();
+                    },
+                    .mcounteren => {
+                        if (op == .write) {
+                            self.mcounteren = @bitCast(value);
+                        } else if (op == .set) {
+                            self.mcounteren |= @bitCast(value);
+                        } else {
+                            self.mcounteren &= ~@as(u32, @bitCast(value));
+                        }
+                    },
+                    .mscratch => {
+                        if (op == .write) {
+                            self.mscratch = @bitCast(value);
+                        } else if (op == .set) {
+                            self.mscratch |= @bitCast(value);
+                        } else {
+                            self.mscratch &= ~@as(u32, @bitCast(value));
+                        }
+                    },
+                    .mepc => {
+                        if (op == .write) {
+                            self.mepc = @bitCast(value);
+                        } else if (op == .set) {
+                            self.mepc |= @bitCast(value);
+                        } else {
+                            self.mepc &= ~@as(u32, @bitCast(value));
+                        }
+                    },
+                    .mcause => {
+                        if (op == .write) {
+                            self.mcause = @bitCast(value);
+                        } else if (op == .set) {
+                            self.mcause |= @bitCast(value);
+                        } else {
+                            self.mcause &= ~@as(u32, @bitCast(value));
+                        }
+                    },
+                    .mtval => {
+                        if (op == .write) {
+                            self.mtval = @bitCast(value);
+                        } else if (op == .set) {
+                            self.mtval |= @bitCast(value);
+                        } else {
+                            self.mtval &= ~@as(u32, @bitCast(value));
+                        }
+                    },
+                    else => unreachable,
+                }
+            },
+        }
+    }
+
     /// Writes pipeline results to the register file
-    fn writeback(self: *@This(), buf: *ExecuteBuffer) void {
+    fn writeback(self: *@This(), buf: ExecuteBuffer) void {
         var rd: u5 = 0;
         if (buf.instruction == 0) return;
-        self.minstret +%= 1;
         switch (buf.decoded) {
             .R => |value| {
                 rd = value.rd;
@@ -850,5 +1135,18 @@ pub const Hart = struct {
         }
         // setReg discards x0 itself
         self.setReg(rd, buf.res);
+    }
+
+    /// Updates performance and time counters
+    fn updateCounters(self: *@This(), buf: ExecuteBuffer) void {
+        if (self.mcounteren & 1 > 0) {
+            self.mcycle +%= 1;
+        }
+        if (self.mcounteren & 2 > 0) {
+            self.time +%= 1;
+        }
+        if (self.mcounteren & 4 > 0 and buf.instruction != 0 and buf.exception == null) {
+            self.minstret +%= 1;
+        }
     }
 };
