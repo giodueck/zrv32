@@ -13,14 +13,14 @@ in Factorio's Circuit Network.
 - [ ] M: integer multiplication and division
 
 Potential goals: Run Linux on the emulated CPU; add Factorio-specific extensions
-- [ ] Exceptions, interrupts and traps
+- [x] Exceptions, interrupts and traps
 - [ ] Zifencei: Instruction-Fetch fence
 - [ ] A: Atomic operations
-- [ ] Zicsr: Control Status Register operations
+- [x] Zicsr: Control Status Register operations
 - [ ] Zicntr: extension for counters
 - [ ] F: Accurate FPU emulation (the IEEE standard used is newer than x86_64)
-- [ ] Privileged ISA
-- [ ] Additional extensions for special operations (power for Factorio)
+- [x] Privileged ISA
+- [ ] Additional extensions or custom instructions for special operations (power for Factorio)
 
 ## Building
 Standard Zig build commands:
@@ -58,10 +58,9 @@ The emulator will run until an EBREAK is run, at which point the CPU state is pr
 
 Will produce the following output:
 ```
-$ ./zig-out/bin/zrv32 out.bin
+$ ./zig-out/bin/zrv32 out.bin -s
 Warning: No program binary loaded
-
-pc: 0x00001034
+pc: 0x00001038
 zero ( x0) 0x00000000 |   ra ( x1) 0x00000000
   sp ( x2) 0x00000000 |   gp ( x3) 0x00000000
   tp ( x4) 0x00000000 |   t0 ( x5) 0x00000000
@@ -78,6 +77,15 @@ zero ( x0) 0x00000000 |   ra ( x1) 0x00000000
  s10 (x26) 0x00000000 |  s11 (x27) 0x00000000
   t3 (x28) 0x00000000 |   t4 (x29) 0x00000000
   t5 (x30) 0x00000000 |   t6 (x31) 0x00000000
+
+(priv) = 3 Machine
+mstatus = 0x00000000 (MPP = 0 User)
+mscratch = 0x00000000
+mtvec = 0x00000000
+mepc = 0x00000000 | mtval = 0x00000000
+mcause = 0x00000000
+cycle = 0x000000000000000e
+instret = 0x0000000000000009
 ```
 
 ### Creating programs

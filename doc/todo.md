@@ -40,4 +40,6 @@
 ## Interactive emulator
 
 - [x] Run program
-- [ ] Step through program
+- [x] Step through program
+- [ ] Reset CPU
+- [ ] Intuitive controls
