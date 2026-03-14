@@ -269,6 +269,14 @@ pub const Hart = struct {
         }
     }
 
+    /// Loads the test program into test RAM. Fails silently, TODO don't
+    pub fn loadTestBytes(self: *@This(), rom: []const u8) void {
+        for (rom, 0..) |byte, i| {
+            self.bus.set(self.bus.test_ram_start + @as(u32, @intCast(i)), byte, 1);
+        }
+    }
+
+
     /// Debugging method to print the current Hart state to stderr
     pub fn printState(self: @This()) void {
         std.debug.print("pc: 0x{x:0>8}\n", .{self.pc});
@@ -897,20 +905,20 @@ pub const Hart = struct {
                 };
             },
             riscv.Funct3.SYSTEM.csrrs => {
-                if (buf.rd != 0) buf.res = self.readCsr(@bitCast(decoded.imm)) catch a: {
+                buf.res = self.readCsr(@bitCast(decoded.imm)) catch a: {
                     buf.exception = .IllegalInstruction;
                     break :a 0;
                 };
-                self.writeCsr(@bitCast(decoded.imm), buf.op1, .set) catch {
+                if (decoded.rs1 != 0) self.writeCsr(@bitCast(decoded.imm), buf.op1, .set) catch {
                     buf.exception = .IllegalInstruction;
                 };
             },
             riscv.Funct3.SYSTEM.csrrc => {
-                if (buf.rd != 0) buf.res = self.readCsr(@bitCast(decoded.imm)) catch a: {
+                buf.res = self.readCsr(@bitCast(decoded.imm)) catch a: {
                     buf.exception = .IllegalInstruction;
                     break :a 0;
                 };
-                self.writeCsr(@bitCast(decoded.imm), buf.op1, .clear) catch {
+                if (decoded.rs1 != 0) self.writeCsr(@bitCast(decoded.imm), buf.op1, .clear) catch {
                     buf.exception = .IllegalInstruction;
                 };
             },
@@ -919,12 +927,12 @@ pub const Hart = struct {
                     buf.exception = .IllegalInstruction;
                     break :a 0;
                 };
-                if (decoded.rs1 != 0) self.writeCsr(@bitCast(decoded.imm), decoded.rs1, .write) catch {
+                self.writeCsr(@bitCast(decoded.imm), decoded.rs1, .write) catch {
                     buf.exception = .IllegalInstruction;
                 };
             },
             riscv.Funct3.SYSTEM.csrrsi => {
-                if (buf.rd != 0) buf.res = self.readCsr(@bitCast(decoded.imm)) catch a: {
+                buf.res = self.readCsr(@bitCast(decoded.imm)) catch a: {
                     buf.exception = .IllegalInstruction;
                     break :a 0;
                 };
@@ -933,7 +941,7 @@ pub const Hart = struct {
                 };
             },
             riscv.Funct3.SYSTEM.csrrci => {
-                if (buf.rd != 0) buf.res = self.readCsr(@bitCast(decoded.imm)) catch a: {
+                buf.res = self.readCsr(@bitCast(decoded.imm)) catch a: {
                     buf.exception = .IllegalInstruction;
                     break :a 0;
                 };

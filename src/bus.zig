@@ -7,22 +7,25 @@
 // Memory map
 //
 //              |---------------------------|   Access (Read/Write/Execute = rwx)
-//              | Unused                    |   r--
+// 0x8001 FFFF  | Test memory (128KB)       |   rwx
+// 0x8000 0000  |                           |
+//              |---------------------------|
+//              | Unused                    |   ---
 //              |---------------------------|
 // 0x0004 FFFF  | Dynamic RAM (64KB)        |   rw-
 // 0x0004 0000  |                           |
 //              |---------------------------|
-//              | Unused                    |   r--
+//              | Unused                    |   ---
 //              |---------------------------|
 // 0x0001 FFFF  | Mapped I/O (64KB)         |   rw-
 // 0x0001 0000  |                           |
 //              |---------------------------|
-//              | Unused                    |   r--
+//              | Unused                    |   ---
 //              |---------------------------|
-// 0x0000 7FFF  | Program ROM (24KB)        |   --x
+// 0x0000 7FFF  | Program ROM (24KB)        |   r-x
 // 0x0000 1000  |                           |
 //              |---------------------------|
-// 0x0000 1FFF  | Boot ROM    (4KB)         |   --x
+// 0x0000 1FFF  | Boot ROM    (4KB)         |   r-x
 // 0x0000 1000  | Boot address: 0x0000 1000 |
 // 0x0000 0000  |---------------------------|
 //
@@ -46,6 +49,10 @@
 const std = @import("std");
 
 const chardev = @import("chardev.zig");
+
+pub const TestRamStart: u32 = 0x8000_0000;
+// 128KB of memory for running tests
+pub const TestRamSize: u32 = 0x2_0000;
 
 pub const RamStart: u32 = 0x0004_0000;
 // 64KB of main memory
@@ -117,6 +124,16 @@ const MemoryMap = .{
         .start = RamStart,
         .size = RamSize,
     },
+    .{
+        .name = "Test RAM",
+        .access = AccessControl{
+            .execute = true,
+            .read = true,
+            .write = true,
+        },
+        .start = TestRamStart,
+        .size = TestRamSize,
+    },
 };
 
 const Devices = enum(u32) {
@@ -128,9 +145,12 @@ pub const Bus = struct {
     boot_rom: []u8 = undefined,
     program_rom: []u8 = undefined,
     ram: []u8 = undefined,
+    test_ram: []u8 = undefined,
 
     allocator: std.mem.Allocator = undefined,
 
+    test_ram_start: u32 = TestRamStart,
+    test_ram_size: u32 = TestRamSize,
     ram_start: u32 = RamStart,
     ram_size: u32 = RamSize,
     program_rom_start: u32 = ProgramRomStart,
@@ -145,10 +165,12 @@ pub const Bus = struct {
         self.boot_rom = try self.allocator.alloc(u8, BootRomSize);
         self.program_rom = try self.allocator.alloc(u8, ProgramRomSize);
         self.ram = try self.allocator.alloc(u8, RamSize);
+        self.test_ram = try self.allocator.alloc(u8, TestRamSize);
         self.chardev.init(null);
     }
 
     pub fn deinit(self: @This()) void {
+        self.allocator.free(self.test_ram);
         self.allocator.free(self.ram);
         self.allocator.free(self.program_rom);
         self.allocator.free(self.boot_rom);
@@ -164,6 +186,8 @@ pub const Bus = struct {
     fn setb(self: *@This(), addr: u32, byte: u8) void {
         if (addr >= RamStart and addr < RamStart + RamSize) {
             self.ram[addr - RamStart] = byte;
+        } else if (addr >= TestRamStart and addr < TestRamStart + TestRamSize) {
+            self.test_ram[addr - TestRamStart] = byte;
         } else if (addr >= ProgramRomStart and addr < ProgramRomStart + ProgramRomSize) {
             self.ram[addr - ProgramRomStart] = byte;
         } else if (addr >= BootRomStart and addr < BootRomStart + BootRomSize) {
@@ -246,6 +270,8 @@ pub const Bus = struct {
     fn getb(self: @This(), addr: u32) u8 {
         if (addr >= RamStart and addr < RamStart + RamSize) {
             return self.ram[addr - RamStart];
+        } else if (addr >= TestRamStart and addr < TestRamStart + TestRamSize) {
+            return self.test_ram[addr - TestRamStart];
         } else if (addr >= ProgramRomStart and addr < ProgramRomStart + ProgramRomSize) {
             return self.ram[addr - ProgramRomStart];
         } else if (addr >= BootRomStart and addr < BootRomStart + BootRomSize) {

@@ -26,6 +26,10 @@ pub fn main() !u8 {
             .names = .{ .short = 's', .long = "stdout" },
         },
         .{
+            .id = 't',
+            .names = .{ .short = 't', .long = "test" },
+        },
+        .{
             // positional: boot program
             .id = 'b',
             .takes_value = .one,
@@ -54,6 +58,8 @@ pub fn main() !u8 {
         "   -h  --help      Print this help menu and exit\n" ++
         "   -s  --stdout    Use basic stdout output. This mode only supports running the\n" ++
         "                   emulator until a breakpoint is hit in Machine mode.\n" ++
+        "   -t  --test      Treat the boot binary executable as a test from the riscv-tests\n" ++
+        "                   test suite. This loads the program at address 0x8000_0000 instead.\n" ++
         "\n";
 
     var iter = try std.process.ArgIterator.initWithAllocator(allocator);
@@ -77,6 +83,7 @@ pub fn main() !u8 {
     var boot_loaded = false;
     var program_loaded = false;
     var stdout_mode = false;
+    var do_test = false;
 
     // We use the streaming parser, so we consume each argument individually
     while (cla_parser.next() catch |err| {
@@ -97,20 +104,40 @@ pub fn main() !u8 {
             's' => {
                 stdout_mode = true;
             },
+            't' => {
+                do_test = true;
+            },
             'b' => {
-                var fd = try std.fs.cwd().openFile(arg.value.?, .{ .mode = .read_only });
-                defer fd.close();
-                const buf = try allocator.alloc(u8, hart.bus.boot_rom_size);
-                defer allocator.free(buf);
-                var reader = fd.reader(buf);
-                if (try reader.getSize() > hart.bus.boot_rom_size) {
-                    try stderr.print("Boot binary \"{s}\" too large: {d} out of a maximum of {d}\n", .{ arg.value.?, try reader.getSize(), hart.bus.boot_rom_size });
-                    return 1;
+                if (do_test) {
+                    var fd = try std.fs.cwd().openFile(arg.value.?, .{ .mode = .read_only });
+                    defer fd.close();
+                    const buf = try allocator.alloc(u8, hart.bus.test_ram_size);
+                    defer allocator.free(buf);
+                    var reader = fd.reader(buf);
+                    if (try reader.getSize() > hart.bus.test_ram_size) {
+                        try stderr.print("Test binary \"{s}\" too large: {d} out of a maximum of {d}\n", .{ arg.value.?, try reader.getSize(), hart.bus.test_ram_size });
+                        return 1;
+                    }
+                    reader.interface.readSliceAll(buf) catch |e| {
+                        if (e != error.EndOfStream) return e;
+                    };
+                    hart.loadTestBytes(buf);
+                    hart.loadBootROM(&[_]u32{ riscv.assemble("lui ra, -524288"), riscv.assemble("jr ra, 0") });
+                } else {
+                    var fd = try std.fs.cwd().openFile(arg.value.?, .{ .mode = .read_only });
+                    defer fd.close();
+                    const buf = try allocator.alloc(u8, hart.bus.boot_rom_size);
+                    defer allocator.free(buf);
+                    var reader = fd.reader(buf);
+                    if (try reader.getSize() > hart.bus.boot_rom_size) {
+                        try stderr.print("Boot binary \"{s}\" too large: {d} out of a maximum of {d}\n", .{ arg.value.?, try reader.getSize(), hart.bus.boot_rom_size });
+                        return 1;
+                    }
+                    reader.interface.readSliceAll(buf) catch |e| {
+                        if (e != error.EndOfStream) return e;
+                    };
+                    hart.loadBootROMBytes(buf);
                 }
-                reader.interface.readSliceAll(buf) catch |e| {
-                    if (e != error.EndOfStream) return e;
-                };
-                hart.loadBootROMBytes(buf);
                 boot_loaded = true;
             },
             'x' => {
