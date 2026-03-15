@@ -1,6 +1,23 @@
+//! TUI layout
+//!
+//! The layout focuses on making the emulator transparent and debugging easy.
+//! It does not include a disassembler to show which line in a program is being run,
+//! but it shows the state of the processor and output, and allows for fine-grained
+//! control over execution.
+//!
+//! The layout is:
+//!
+//! ┌─────────────┐ ┌─────────────┐
+//! │Real state   │ │Character    │
+//! └─────────────┘ │output window│
+//! ┌─────────────┐ │             │
+//! │Logical state│ │             │
+//! └─────────────┘ └─────────────┘
+
 const std = @import("std");
 
 const vaxis = @import("vaxis");
+const vxfw = vaxis.vxfw;
 const Cell = vaxis.Cell;
 const TextView = vaxis.widgets.TextView;
 const border = vaxis.widgets.border;
@@ -52,15 +69,23 @@ pub fn tuiMain(allocator: std.mem.Allocator, hart: *Hart) !void {
     // We'll adjust the color index every keypress for the border
     var color_idx: u8 = 0;
 
-    var state_text_view = TextView{.scroll_view = .{ .vertical_scrollbar = .{ .character = .{ .grapheme = " " } } }};
+    // Real state view
+    var state_text_view = TextView{ .scroll_view = .{ .vertical_scrollbar = .{ .character = .{ .grapheme = " " } } } };
     var state_text_view_buffer = TextView.Buffer{};
     defer state_text_view_buffer.deinit(allocator);
 
+    // Logical (from the execution state PoV) state view
+    var logical_state_text_view = TextView{ .scroll_view = .{ .vertical_scrollbar = .{ .character = .{ .grapheme = " " } } } };
+    var logical_state_text_view_buffer = TextView.Buffer{};
+    defer logical_state_text_view_buffer.deinit(allocator);
+
+    // Text output writer
     var raw_output_writer = std.io.Writer.Allocating.init(allocator);
     defer raw_output_writer.deinit();
     hart.bus.setCharDevWriter(&raw_output_writer.writer);
 
-    var output_text_view = TextView{.scroll_view = .{ .vertical_scrollbar = .{ .character = .{ .grapheme = " " } } }};
+    // Text output view
+    var output_text_view = TextView{ .scroll_view = .{ .vertical_scrollbar = .{ .character = .{ .grapheme = " " } } } };
     var output_text_view_buffer = TextView.Buffer{};
     defer output_text_view_buffer.deinit(allocator);
 
@@ -77,10 +102,6 @@ pub fn tuiMain(allocator: std.mem.Allocator, hart: *Hart) !void {
         // has the fields for those events (ie "key_press", "winsize")
         switch (event) {
             .key_press => |key| {
-                color_idx = switch (color_idx) {
-                    255 => 0,
-                    else => color_idx + 1,
-                };
                 if (key.matches('c', .{ .ctrl = true }) or key.matches('q', .{})) {
                     break;
                 } else if (key.matches('l', .{ .ctrl = true })) {
@@ -108,6 +129,8 @@ pub fn tuiMain(allocator: std.mem.Allocator, hart: *Hart) !void {
             else => {},
         }
 
+        if (step) color_idx +%= 1;
+
         // vx.window() returns the root window. This window is the size of the
         // terminal and can spawn child windows as logical areas. Child windows
         // cannot draw outside of their bounds
@@ -123,6 +146,12 @@ pub fn tuiMain(allocator: std.mem.Allocator, hart: *Hart) !void {
             .fg = .{ .index = color_idx },
         };
 
+        // Step the emulator, if appropriate
+        if (step and !hart.ebreak and hart.fatal_exception == null) {
+            hart.step();
+        }
+
+        // Real state
         const state_win = win.child(.{
             .x_off = 2,
             .y_off = 1,
@@ -134,25 +163,39 @@ pub fn tuiMain(allocator: std.mem.Allocator, hart: *Hart) !void {
             },
         });
 
-        if (step and !hart.ebreak and hart.fatal_exception == null) {
-            hart.step();
-        }
-
         const state_str = try hart.allocPrintState(allocator);
         defer allocator.free(state_str);
         try state_text_view_buffer.update(allocator, .{ .bytes = state_str });
         state_text_view.draw(state_win, state_text_view_buffer);
 
-        const output_win = win.child(.{
-            .x_off = state_win.x_off + state_win.width + 2,
-            .y_off = 1,
-            .width = 80,
+        // Logical state
+        const logical_state_win = win.child(.{
+            .x_off = 2,
+            .y_off = 30,
+            .width = 50,
             .height = 28,
             .border = .{
                 .where = .all,
                 .style = style,
-            }
+            },
         });
+
+        const highlight_style: vaxis.Style = .{
+            .bg = .{ .index = 130 },
+        };
+
+        // This string will have highlights, which we must manually apply by setting a style
+        var logical_state_str = try hart.allocPrintExecState(allocator);
+        defer logical_state_str.deinit();
+        try logical_state_text_view_buffer.update(allocator, .{ .bytes = logical_state_str.slice });
+        try logical_state_text_view_buffer.updateStyle(allocator, .{ .style = highlight_style, .begin = logical_state_str.hi_begin, .end = logical_state_str.hi_end });
+        logical_state_text_view.draw(logical_state_win, logical_state_text_view_buffer);
+
+        // Text output
+        const output_win = win.child(.{ .x_off = state_win.x_off + state_win.width + 2, .y_off = 1, .width = 80, .height = 28, .border = .{
+            .where = .all,
+            .style = style,
+        } });
 
         try output_text_view_buffer.update(allocator, .{ .bytes = raw_output_writer.written() });
         output_text_view.draw(output_win, output_text_view_buffer);
