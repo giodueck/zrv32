@@ -48,6 +48,8 @@
 
 const std = @import("std");
 
+const Bus = @import("Bus.zig");
+
 const chardev = @import("chardev.zig");
 
 pub const TestRamStart: u32 = 0x8000_0000;
@@ -141,11 +143,11 @@ const Devices = enum(u32) {
     _,
 };
 
-pub const Bus = struct {
-    boot_rom: []u8 = undefined,
-    program_rom: []u8 = undefined,
-    ram: []u8 = undefined,
-    test_ram: []u8 = undefined,
+pub const StandardBus = struct {
+    boot_rom: []u8 = &.{},
+    program_rom: []u8 = &.{},
+    ram: []u8 = &.{},
+    test_ram: []u8 = &.{},
 
     allocator: std.mem.Allocator = undefined,
 
@@ -158,6 +160,8 @@ pub const Bus = struct {
     boot_rom_start: u32 = BootRomStart,
     boot_rom_size: u32 = BootRomSize,
 
+    start: u32 = BootRomStart,
+
     chardev: chardev.CharDev = undefined,
 
     pub fn init(self: *@This(), allocator: std.mem.Allocator) !void {
@@ -167,13 +171,18 @@ pub const Bus = struct {
         self.ram = try self.allocator.alloc(u8, RamSize);
         self.test_ram = try self.allocator.alloc(u8, TestRamSize);
         self.chardev.init(null);
+        self.start = BootRomStart;
     }
 
-    pub fn deinit(self: @This()) void {
+    pub fn deinit(self: *@This()) void {
         self.allocator.free(self.test_ram);
         self.allocator.free(self.ram);
         self.allocator.free(self.program_rom);
         self.allocator.free(self.boot_rom);
+    }
+
+    pub fn interface(self: *@This()) Bus {
+        return Bus.implBy(self);
     }
 
     pub fn setCharDevWriter(self: *@This(), writer: *std.io.Writer) void {
@@ -267,7 +276,7 @@ pub const Bus = struct {
     /// Get a single byte.
     /// Illegal access will fail silently and return 0.
     /// Does not check access control.
-    fn getb(self: @This(), addr: u32) u8 {
+    fn getb(self: *@This(), addr: u32) u8 {
         if (addr >= RamStart and addr < RamStart + RamSize) {
             return self.ram[addr - RamStart];
         } else if (addr >= TestRamStart and addr < TestRamStart + TestRamSize) {
@@ -290,7 +299,7 @@ pub const Bus = struct {
     ///
     /// For access from an instruction, use the load method instead.
     /// Reading from restricted memory is perfectly fine in this method, as it is not meant for emulator use.
-    pub fn get(self: @This(), addr: u32, width: u3) u32 {
+    pub fn get(self: *@This(), addr: u32, width: u3) u32 {
         if (width > 4) return 0;
 
         var value: u32 = 0;
@@ -350,5 +359,10 @@ pub const Bus = struct {
         }
 
         return MemoryError.InstructionAccessFault;
+    }
+
+    /// Get PC reset value
+    pub fn getStart(self: @This()) u32 {
+        return self.start;
     }
 };

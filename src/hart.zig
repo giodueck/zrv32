@@ -1,7 +1,8 @@
 //! A Hart is to Risc-V what a Core is to x86. It is a distinct processing unit.
 
 const std = @import("std");
-const bus = @import("bus.zig");
+const Bus = @import("Bus.zig");
+const standardBus = @import("bus.zig");
 const riscv = @import("riscv.zig");
 
 /// Keeps the result of the last Fetch operation
@@ -97,21 +98,8 @@ pub const Hart = struct {
     read_registers_buf: ReadRegistersBuffer = .{},
     execute_buf: ExecuteBuffer = .{},
 
-    // Memory bus implementation
-    bus: bus.Bus = .{},
-
-    // Allocator for internal use
-    allocator: std.mem.Allocator = undefined,
-
-    pub fn init(self: *@This(), allocator: std.mem.Allocator) !void {
-        self.allocator = allocator;
-        try self.bus.init(self.allocator);
-        self.reset();
-    }
-
-    pub fn deinit(self: @This()) void {
-        self.bus.deinit();
-    }
+    // Memory bus interface
+    bus: Bus,
 
     pub fn reset(self: *@This()) void {
         self.fetch_buf = FetchBuffer{};
@@ -119,7 +107,7 @@ pub const Hart = struct {
         self.read_registers_buf = ReadRegistersBuffer{};
         self.execute_buf = ExecuteBuffer{};
         self.priv = .Machine;
-        self.pc = self.bus.boot_rom_start;
+        self.pc = self.bus.getStart();
         self.flush = 3;
         self.mstatus = std.mem.zeroes(riscv.MStatus);
         self.mstatush = std.mem.zeroes(riscv.MStatusH);
@@ -211,8 +199,8 @@ pub const Hart = struct {
         self.read_registers_buf = ReadRegistersBuffer{};
         self.execute_buf = ExecuteBuffer{};
 
-        self.bus.set(self.bus.boot_rom_start, instr, 4);
-        self.pc = self.bus.boot_rom_start;
+        self.bus.set(self.bus.start, instr, 4);
+        self.pc = self.bus.start;
 
         inline for (0..6) |_| {
             self.step();
@@ -228,7 +216,7 @@ pub const Hart = struct {
         self.execute_buf = ExecuteBuffer{};
 
         self.loadBootROM(program);
-        self.pc = self.bus.boot_rom_start;
+        self.pc = self.bus.start;
 
         // Pipeline overhead
         inline for (0..5) |_| {
@@ -241,38 +229,17 @@ pub const Hart = struct {
         }
     }
 
-    /// Loads the boot ROM. Fails silently, TODO don't
-    pub fn loadBootROM(self: *@This(), rom: []const u32) void {
-        for (rom, 0..) |word, i| {
-            self.bus.set(self.bus.boot_rom_start + @as(u32, @intCast(i * 4)), word, 4);
+    /// Loads a slice of u32 into memory starting at the address given. Fails silently.
+    pub fn loadProgram(self: *@This(), address: u32, rom: []const u32) void {
+        for (rom, 0..) |word, off| {
+            self.bus.set(address +% @as(u32, @intCast(off * 4)), word, 4);
         }
     }
 
-    /// Loads the program ROM. Fails silently, TODO don't
-    pub fn loadProgramROM(self: *@This(), rom: []const u32) void {
-        for (rom, 0..) |word, i| {
-            self.bus.set(self.bus.program_rom_start + @as(u32, @intCast(i * 4)), word, 4);
-        }
-    }
-
-    /// Loads the boot ROM. Fails silently, TODO don't
-    pub fn loadBootROMBytes(self: *@This(), rom: []const u8) void {
-        for (rom, 0..) |byte, i| {
-            self.bus.set(self.bus.boot_rom_start + @as(u32, @intCast(i)), byte, 1);
-        }
-    }
-
-    /// Loads the program ROM. Fails silently, TODO don't
-    pub fn loadProgramROMBytes(self: *@This(), rom: []const u8) void {
-        for (rom, 0..) |byte, i| {
-            self.bus.set(self.bus.program_rom_start + @as(u32, @intCast(i)), byte, 1);
-        }
-    }
-
-    /// Loads the test program into test RAM. Fails silently, TODO don't
-    pub fn loadTestBytes(self: *@This(), rom: []const u8) void {
-        for (rom, 0..) |byte, i| {
-            self.bus.set(self.bus.test_ram_start + @as(u32, @intCast(i)), byte, 1);
+    /// Loads a slice of bytes into memory starting at the address given. Fails silently.
+    pub fn loadProgramBytes(self: *@This(), address: u32, rom: []const u8) void {
+        for (rom, 0..) |byte, off| {
+            self.bus.set(address +% @as(u32, @intCast(off)), byte, 1);
         }
     }
 
@@ -361,6 +328,9 @@ pub const Hart = struct {
         for (lines.items) |line| {
             ret.appendSliceAssumeCapacity(line);
         }
+        if (self.fatal_exception != null) {
+            try lines.append(allocator, try std.fmt.allocPrint(allocator, "\nError: Fatal unhandled exception\n", .{}));
+        }
         return buf;
     }
 
@@ -379,7 +349,6 @@ pub const Hart = struct {
     /// The point of view is from the Execute and memory access pipeline step, including flushes and forwarded values.
     /// The returned HighlightedPrint must be freed by calling the member function deinit().
     pub fn allocPrintExecState(self: @This(), allocator: std.mem.Allocator) !HighlightedPrint {
-        // TODO finish
         var lines = std.ArrayList([]u8).empty;
         defer lines.deinit(allocator);
         defer {
@@ -514,9 +483,9 @@ pub const Hart = struct {
 
         // 1. Fetch
         self.fetch_buf.instruction = self.bus.fetch(self.pc) catch |e| err: {
-            if (e == bus.MemoryError.InstructionAddressMisaligned) {
+            if (e == Bus.MemoryError.InstructionAddressMisaligned) {
                 self.execute_buf.exception = riscv.ExceptionCause.InstructionAddressMisaligned;
-            } else if (e == bus.MemoryError.InstructionAccessFault) {
+            } else if (e == Bus.MemoryError.InstructionAccessFault) {
                 self.execute_buf.exception = riscv.ExceptionCause.InstructionAccessFault;
             }
             self.fatal_exception = self.execute_buf.exception.?;
@@ -873,9 +842,9 @@ pub const Hart = struct {
             switch (buf.decoded.I.funct3) {
                 riscv.Funct3.LOAD.lb, riscv.Funct3.LOAD.lbu => |value| {
                     buf.res = self.bus.load(buf.addr, 1) catch |e| err: {
-                        if (e == bus.MemoryError.LoadAccessFault) {
+                        if (e == Bus.MemoryError.LoadAccessFault) {
                             buf.trap = riscv.Traps.LoadAccessFault;
-                        } else if (e == bus.MemoryError.IllegalInstruction) {
+                        } else if (e == Bus.MemoryError.IllegalInstruction) {
                             buf.exception = .IllegalInstruction;
                         }
                         break :err 0;
@@ -886,9 +855,9 @@ pub const Hart = struct {
                 },
                 riscv.Funct3.LOAD.lh, riscv.Funct3.LOAD.lhu => |value| {
                     buf.res = self.bus.load(buf.addr, 2) catch |e| err: {
-                        if (e == bus.MemoryError.LoadAccessFault) {
+                        if (e == Bus.MemoryError.LoadAccessFault) {
                             buf.trap = riscv.Traps.LoadAccessFault;
-                        } else if (e == bus.MemoryError.IllegalInstruction) {
+                        } else if (e == Bus.MemoryError.IllegalInstruction) {
                             buf.exception = .IllegalInstruction;
                         }
                         break :err 0;
@@ -899,9 +868,9 @@ pub const Hart = struct {
                 },
                 riscv.Funct3.LOAD.lw => {
                     buf.res = self.bus.load(buf.addr, 4) catch |e| err: {
-                        if (e == bus.MemoryError.LoadAccessFault) {
+                        if (e == Bus.MemoryError.LoadAccessFault) {
                             buf.trap = riscv.Traps.LoadAccessFault;
-                        } else if (e == bus.MemoryError.IllegalInstruction) {
+                        } else if (e == Bus.MemoryError.IllegalInstruction) {
                             buf.exception = .IllegalInstruction;
                         }
                         break :err 0;
@@ -916,27 +885,27 @@ pub const Hart = struct {
             switch (buf.decoded.S.funct3) {
                 riscv.Funct3.STORE.sb => {
                     self.bus.store(buf.addr, buf.op2, 1) catch |e| {
-                        if (e == bus.MemoryError.StoreAccessFault) {
+                        if (e == Bus.MemoryError.StoreAccessFault) {
                             buf.trap = riscv.Traps.StoreAccessFault;
-                        } else if (e == bus.MemoryError.IllegalInstruction) {
+                        } else if (e == Bus.MemoryError.IllegalInstruction) {
                             buf.exception = .IllegalInstruction;
                         }
                     };
                 },
                 riscv.Funct3.STORE.sh => {
                     self.bus.store(buf.addr, buf.op2, 2) catch |e| {
-                        if (e == bus.MemoryError.StoreAccessFault) {
+                        if (e == Bus.MemoryError.StoreAccessFault) {
                             buf.trap = riscv.Traps.StoreAccessFault;
-                        } else if (e == bus.MemoryError.IllegalInstruction) {
+                        } else if (e == Bus.MemoryError.IllegalInstruction) {
                             buf.exception = .IllegalInstruction;
                         }
                     };
                 },
                 riscv.Funct3.STORE.sw => {
                     self.bus.store(buf.addr, buf.op2, 4) catch |e| {
-                        if (e == bus.MemoryError.StoreAccessFault) {
+                        if (e == Bus.MemoryError.StoreAccessFault) {
                             buf.trap = riscv.Traps.StoreAccessFault;
-                        } else if (e == bus.MemoryError.IllegalInstruction) {
+                        } else if (e == Bus.MemoryError.IllegalInstruction) {
                             buf.exception = .IllegalInstruction;
                         }
                     };

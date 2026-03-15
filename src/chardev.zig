@@ -1,6 +1,7 @@
 const std = @import("std");
 
 pub const CharDev = struct {
+    /// When writer is null, stdout will be taken as a default value
     writer: ?*std.io.Writer = undefined,
 
     pub fn init(self: *@This(), writer: ?*std.io.Writer) void {

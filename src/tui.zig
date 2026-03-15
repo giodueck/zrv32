@@ -151,7 +151,7 @@ pub fn tuiMain(allocator: std.mem.Allocator, hart: *Hart) !void {
             .x_off = 2,
             .y_off = 1,
             .width = 50,
-            .height = 28,
+            .height = 30,
             .border = .{
                 .where = .all,
                 .style = style,
@@ -166,7 +166,7 @@ pub fn tuiMain(allocator: std.mem.Allocator, hart: *Hart) !void {
         // Logical state
         const logical_state_win = win.child(.{
             .x_off = 2,
-            .y_off = 30,
+            .y_off = 32,
             .width = 50,
             .height = 28,
             .border = .{

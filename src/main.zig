@@ -2,14 +2,16 @@ const std = @import("std");
 const clap = @import("clap");
 
 const Hart = @import("hart.zig").Hart;
+const standardBus = @import("bus.zig");
 const riscv = @import("riscv.zig");
 
 const tui = @import("tui.zig");
 
 pub fn main() !u8 {
+    var allocator = std.heap.page_allocator;
+
     var arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
     defer arena.deinit();
-    const allocator = arena.allocator();
 
     var stderr_buf: [1024]u8 = undefined;
     var stderr_writer = std.fs.File.stderr().writer(&stderr_buf);
@@ -62,7 +64,7 @@ pub fn main() !u8 {
         "                   test suite. This loads the program at address 0x8000_0000 instead.\n" ++
         "\n";
 
-    var iter = try std.process.ArgIterator.initWithAllocator(allocator);
+    var iter = try std.process.ArgIterator.initWithAllocator(arena.allocator());
     defer iter.deinit();
 
     // Skip program name
@@ -77,9 +79,12 @@ pub fn main() !u8 {
     };
 
     // Program binaries will be directly stored in the emulator memory
-    var hart: Hart = .{};
-    try hart.init(std.heap.page_allocator);
-    defer hart.deinit();
+    var bus = try allocator.create(standardBus.StandardBus);
+    defer allocator.destroy(bus);
+    try bus.init(allocator);
+    defer bus.deinit();
+    var hart: Hart = .{ .bus = bus.interface() };
+
     var boot_loaded = false;
     var program_loaded = false;
     var stdout_mode = false;
@@ -111,56 +116,53 @@ pub fn main() !u8 {
                 if (do_test) {
                     var fd = try std.fs.cwd().openFile(arg.value.?, .{ .mode = .read_only });
                     defer fd.close();
-                    const buf = try allocator.alloc(u8, hart.bus.test_ram_size);
-                    defer allocator.free(buf);
+                    const buf = try arena.allocator().alloc(u8, standardBus.TestRamSize);
                     var reader = fd.reader(buf);
-                    if (try reader.getSize() > hart.bus.test_ram_size) {
-                        try stderr.print("Test binary \"{s}\" too large: {d} out of a maximum of {d}\n", .{ arg.value.?, try reader.getSize(), hart.bus.test_ram_size });
+                    if (try reader.getSize() > standardBus.TestRamSize) {
+                        try stderr.print("Test binary \"{s}\" too large: {d} out of a maximum of {d}\n", .{ arg.value.?, try reader.getSize(), standardBus.TestRamSize });
                         return 1;
                     }
                     reader.interface.readSliceAll(buf) catch |e| {
                         if (e != error.EndOfStream) return e;
                     };
-                    hart.loadTestBytes(buf);
-                    hart.loadBootROM(&[_]u32{ riscv.assemble("lui ra, -524288"), riscv.assemble("jr ra, 0") });
+                    hart.loadProgramBytes(standardBus.TestRamStart, buf);
+                    hart.loadProgram(standardBus.BootRomStart, &[_]u32{ riscv.assemble("lui ra, -524288"), riscv.assemble("jr ra, 0") });
                 } else {
                     var fd = try std.fs.cwd().openFile(arg.value.?, .{ .mode = .read_only });
                     defer fd.close();
-                    const buf = try allocator.alloc(u8, hart.bus.boot_rom_size);
-                    defer allocator.free(buf);
+                    const buf = try arena.allocator().alloc(u8, standardBus.BootRomSize);
                     var reader = fd.reader(buf);
-                    if (try reader.getSize() > hart.bus.boot_rom_size) {
-                        try stderr.print("Boot binary \"{s}\" too large: {d} out of a maximum of {d}\n", .{ arg.value.?, try reader.getSize(), hart.bus.boot_rom_size });
+                    if (try reader.getSize() > standardBus.BootRomSize) {
+                        try stderr.print("Boot binary \"{s}\" too large: {d} out of a maximum of {d}\n", .{ arg.value.?, try reader.getSize(), standardBus.BootRomSize });
                         return 1;
                     }
                     reader.interface.readSliceAll(buf) catch |e| {
                         if (e != error.EndOfStream) return e;
                     };
-                    hart.loadBootROMBytes(buf);
+                    hart.loadProgramBytes(standardBus.BootRomStart, buf);
                 }
                 boot_loaded = true;
             },
             'x' => {
                 var fd = try std.fs.cwd().openFile(arg.value.?, .{ .mode = .read_only });
                 defer fd.close();
-                const buf = try allocator.alloc(u8, hart.bus.program_rom_size);
-                defer allocator.free(buf);
+                const buf = try arena.allocator().alloc(u8, standardBus.ProgramRomSize);
                 var reader = fd.reader(buf);
-                if (try reader.getSize() > hart.bus.program_rom_size) {
-                    try stderr.print("Program binary \"{s}\" too large: {d} out of a maximum of {d}\n", .{ arg.value.?, try reader.getSize(), hart.bus.program_rom_size });
+                if (try reader.getSize() > standardBus.ProgramRomSize) {
+                    try stderr.print("Program binary \"{s}\" too large: {d} out of a maximum of {d}\n", .{ arg.value.?, try reader.getSize(), standardBus.ProgramRomSize });
                     return 1;
                 }
                 reader.interface.readSliceAll(buf) catch |e| {
                     if (e != error.EndOfStream) return e;
                 };
-                hart.loadProgramROMBytes(buf);
+                hart.loadProgramBytes(standardBus.ProgramRomStart, buf);
                 program_loaded = true;
             },
             else => unreachable,
         }
     }
 
-    // Free parser resources, but keep the reserved capacity
+    // Free parser resources
     _ = arena.reset(.free_all);
 
     // Command-line argument parsing done
@@ -175,6 +177,8 @@ pub fn main() !u8 {
         try stderr.print("Warning: No program binary loaded\n", .{});
         try stderr.flush();
     }
+
+    hart.reset();
 
     if (stdout_mode) {
         // Run emulator starting at boot binary until Machine mode ebreak is hit or an exception is triggered without a handler defined.
@@ -429,7 +433,7 @@ test "sw, sh, sb" {
 
     hart.execMany(&program);
 
-    try expectEqual(0x12345678, hart.bus.get(hart.bus.ram_start, 4));
-    try expectEqual(0x5678, hart.bus.get(hart.bus.ram_start + 4, 2));
-    try expectEqual(0x78, hart.bus.get(hart.bus.ram_start + 8, 1));
+    try expectEqual(0x12345678, hart.bus.get(standardBus.RamStart, 4));
+    try expectEqual(0x5678, hart.bus.get(standardBus.RamStart + 4, 2));
+    try expectEqual(0x78, hart.bus.get(standardBus.RamStart + 8, 1));
 }
