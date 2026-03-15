@@ -189,9 +189,9 @@ pub const Bus = struct {
         } else if (addr >= TestRamStart and addr < TestRamStart + TestRamSize) {
             self.test_ram[addr - TestRamStart] = byte;
         } else if (addr >= ProgramRomStart and addr < ProgramRomStart + ProgramRomSize) {
-            self.ram[addr - ProgramRomStart] = byte;
+            self.program_rom[addr - ProgramRomStart] = byte;
         } else if (addr >= BootRomStart and addr < BootRomStart + BootRomSize) {
-            self.ram[addr - BootRomStart] = byte;
+            self.boot_rom[addr - BootRomStart] = byte;
         }
         // else invalid address
         return;
@@ -273,9 +273,9 @@ pub const Bus = struct {
         } else if (addr >= TestRamStart and addr < TestRamStart + TestRamSize) {
             return self.test_ram[addr - TestRamStart];
         } else if (addr >= ProgramRomStart and addr < ProgramRomStart + ProgramRomSize) {
-            return self.ram[addr - ProgramRomStart];
+            return self.program_rom[addr - ProgramRomStart];
         } else if (addr >= BootRomStart and addr < BootRomStart + BootRomSize) {
-            return self.ram[addr - BootRomStart];
+            return self.boot_rom[addr - BootRomStart];
         }
         // else invalid address
         return 0;
