@@ -1,51 +1,3 @@
-//! The memory operations operate on the bus, which addresses one unified address space including main memory,
-//! I/O mapped devices and the boot and program ROMs
-//!
-//! This emulated CPU is little-endian, as most real processors are, so the least significant bytes are stored in lower
-//! addresses.
-
-// Memory map
-//
-//              |---------------------------|   Access (Read/Write/Execute = rwx)
-// 0x8001 FFFF  | Test memory (128KB)       |   rwx
-// 0x8000 0000  |                           |
-//              |---------------------------|
-//              | Unused                    |   ---
-//              |---------------------------|
-// 0x0004 FFFF  | Dynamic RAM (64KB)        |   rw-
-// 0x0004 0000  |                           |
-//              |---------------------------|
-//              | Unused                    |   ---
-//              |---------------------------|
-// 0x0001 FFFF  | Mapped I/O (64KB)         |   rw-
-// 0x0001 0000  |                           |
-//              |---------------------------|
-//              | Unused                    |   ---
-//              |---------------------------|
-// 0x0000 7FFF  | Program ROM (24KB)        |   r-x
-// 0x0000 1000  |                           |
-//              |---------------------------|
-// 0x0000 1FFF  | Boot ROM    (4KB)         |   r-x
-// 0x0000 1000  | Boot address: 0x0000 1000 |
-// 0x0000 0000  |---------------------------|
-//
-// This is a Harvard architecture, meaning that program and data memory is separate. Thus, executable memory
-// is not readable or writable, and readable or writable memory is not executable.
-//
-// This memory map is left with some gaps, leaving space to expand regions without needing to split them up.
-// The emulator should be built so that changing these sizes is simple and easy, and the eventual Factorio
-// port may take this exact same map or modify it according to constraints that could arise.
-//
-// I/O devices
-// Timers: registers that count the number ticks passing in real time (60 ticks per second). They could also count
-//          in discrete intervals amounting to the number of ticks per clock cycle.
-//      - A system timer, reset only when the entire system is reset.
-//      - A user timer, reset when the user writes to it.
-//
-// Graphics? A framebuffer that may be manipulated by the CPU
-// A coprocessor? A discrete graphics/picture processor which does more complex operations on the framebuffer like
-// drawing lines or copying sprites.
-
 const std = @import("std");
 
 const Bus = @import("Bus.zig");
@@ -53,40 +5,27 @@ const MemoryError = Bus.MemoryError;
 const AccessControl = Bus.AccessControl;
 const chardev = @import("chardev.zig");
 
-pub const RamStart: u32 = 0x0004_0000;
-// 64KB of main memory
-pub const RamSize: u32 = 0x1_0000;
+pub const TestRamStart: u32 = 0x8000_0000;
+// 1MB of memory for running tests
+pub const TestRamSize: u32 = 0x10_0000;
 
 pub const MmioStart: u32 = 0x0001_0000;
 // 64KB of memory mapped I/O
 pub const MmioSize: u32 = 0x1_0000;
 
-pub const ProgramRomStart: u32 = 0x0000_2000;
-// 24KB of program ROM
-pub const ProgramRomSize: u32 = 0x6000;
-
-pub const BootRomStart: u32 = 0x0000_1000;
-// 4KB of boot ROM
-pub const BootRomSize: u32 = 0x1000;
+/// This address is used by riscv-tests tests to signal end of the test
+pub const HaltAddress: u32 = 0x8000_1004;
 
 const MemoryMap = .{
     .{
-        .name = "Boot ROM",
+        .name = "Test RAM",
         .access = AccessControl{
             .execute = true,
             .read = true,
+            .write = true,
         },
-        .start = BootRomStart,
-        .size = BootRomSize,
-    },
-    .{
-        .name = "Program ROM",
-        .access = AccessControl{
-            .execute = true,
-            .read = true,
-        },
-        .start = ProgramRomStart,
-        .size = ProgramRomSize,
+        .start = TestRamStart,
+        .size = TestRamSize,
     },
     .{
         .name = "Memory mapped I/O",
@@ -98,15 +37,6 @@ const MemoryMap = .{
         .start = MmioStart,
         .size = MmioSize,
     },
-    .{
-        .name = "Dynamic RAM",
-        .access = AccessControl{
-            .read = true,
-            .write = true,
-        },
-        .start = RamStart,
-        .size = RamSize,
-    },
 };
 
 const Devices = enum(u32) {
@@ -114,32 +44,24 @@ const Devices = enum(u32) {
     _,
 };
 
-pub const StandardBus = struct {
-    boot_rom: []u8 = &.{},
-    program_rom: []u8 = &.{},
+pub const TestBus = struct {
     ram: []u8 = &.{},
-    test_ram: []u8 = &.{},
 
     allocator: std.mem.Allocator = undefined,
 
-    start: u32 = BootRomStart,
+    start: u32 = TestRamStart,
 
     chardev: chardev.CharDev = undefined,
 
     pub fn init(self: *@This(), allocator: std.mem.Allocator) !void {
         self.allocator = allocator;
-        self.boot_rom = try self.allocator.alloc(u8, BootRomSize);
-        self.program_rom = try self.allocator.alloc(u8, ProgramRomSize);
-        self.ram = try self.allocator.alloc(u8, RamSize);
+        self.ram = try self.allocator.alloc(u8, TestRamSize);
         self.chardev.init(null);
-        self.start = BootRomStart;
+        self.start = TestRamStart;
     }
 
     pub fn deinit(self: *@This()) void {
-        self.allocator.free(self.test_ram);
         self.allocator.free(self.ram);
-        self.allocator.free(self.program_rom);
-        self.allocator.free(self.boot_rom);
     }
 
     pub fn interface(self: *@This()) Bus {
@@ -154,12 +76,8 @@ pub const StandardBus = struct {
     /// Illegal access will fail silently.
     /// Does not check access control.
     fn setb(self: *@This(), addr: u32, byte: u8) void {
-        if (addr >= RamStart and addr < RamStart + RamSize) {
-            self.ram[addr - RamStart] = byte;
-        } else if (addr >= ProgramRomStart and addr < ProgramRomStart + ProgramRomSize) {
-            self.program_rom[addr - ProgramRomStart] = byte;
-        } else if (addr >= BootRomStart and addr < BootRomStart + BootRomSize) {
-            self.boot_rom[addr - BootRomStart] = byte;
+        if (addr >= TestRamStart and addr < TestRamStart + TestRamSize) {
+            self.ram[addr - TestRamStart] = byte;
         }
         // else invalid address
         return;
@@ -206,6 +124,8 @@ pub const StandardBus = struct {
     pub fn store(self: *@This(), addr: u32, value: u32, width: u32) MemoryError!void {
         if (width > 4 or width == 3) return MemoryError.IllegalInstruction;
 
+        if (addr == HaltAddress) return MemoryError.HaltAddressWritten;
+
         // setb does not check access control, we need to do that here.
         // If a store for any address outside the allowed ranges is requested, return with a StoreAccessFault
         inline for (@typeInfo(@TypeOf(MemoryMap)).@"struct".fields) |field| {
@@ -236,12 +156,8 @@ pub const StandardBus = struct {
     /// Illegal access will fail silently and return 0.
     /// Does not check access control.
     fn getb(self: *@This(), addr: u32) u8 {
-        if (addr >= RamStart and addr < RamStart + RamSize) {
-            return self.ram[addr - RamStart];
-        } else if (addr >= ProgramRomStart and addr < ProgramRomStart + ProgramRomSize) {
-            return self.program_rom[addr - ProgramRomStart];
-        } else if (addr >= BootRomStart and addr < BootRomStart + BootRomSize) {
-            return self.boot_rom[addr - BootRomStart];
+        if (addr >= TestRamStart and addr < TestRamStart + TestRamSize) {
+            return self.ram[addr - TestRamStart];
         }
         // else invalid address
         return 0;

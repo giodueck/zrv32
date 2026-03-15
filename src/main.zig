@@ -3,6 +3,7 @@ const clap = @import("clap");
 
 const Hart = @import("hart.zig").Hart;
 const standardBus = @import("bus.zig");
+const testBus = @import("testbus.zig");
 const riscv = @import("riscv.zig");
 
 const tui = @import("tui.zig");
@@ -78,13 +79,6 @@ pub fn main() !u8 {
         .diagnostic = &diag,
     };
 
-    // Program binaries will be directly stored in the emulator memory
-    var bus = try allocator.create(standardBus.StandardBus);
-    defer allocator.destroy(bus);
-    try bus.init(allocator);
-    defer bus.deinit();
-    var hart: Hart = .{ .bus = bus.interface() };
-
     var stdout_mode = false;
     var do_test = false;
     var boot_fd: ?std.fs.File = null;
@@ -131,20 +125,42 @@ pub fn main() !u8 {
 
     // Command-line argument parsing done
 
+    // Standard bus
+    var bus: ?*standardBus.StandardBus = null;
+    if (!do_test) bus = try allocator.create(standardBus.StandardBus);
+    defer {
+        if (bus != null) allocator.destroy(bus.?);
+    }
+    if (!do_test) try bus.?.init(allocator);
+    defer {
+        if (bus != null) bus.?.deinit();
+    }
+
+    var test_bus: ?*testBus.TestBus = null;
+    if (do_test) test_bus = try allocator.create(testBus.TestBus);
+    defer {
+        if (test_bus != null) allocator.destroy(test_bus.?);
+    }
+    if (do_test) try test_bus.?.init(allocator);
+    defer {
+        if (test_bus != null) test_bus.?.deinit();
+    }
+
+    var hart: Hart = .{ .bus = if (!do_test) bus.?.interface() else test_bus.?.interface() };
+
     if (boot_fd) |fd| {
         if (do_test) {
-            const buf = try allocator.alloc(u8, standardBus.TestRamSize);
+            const buf = try allocator.alloc(u8, testBus.TestRamSize);
             defer allocator.free(buf);
             var reader = fd.reader(buf);
-            if (try reader.getSize() > standardBus.TestRamSize) {
-                try stderr.print("Test binary \"{s}\" too large: {d} out of a maximum of {d}\n", .{ boot_filename.?, try reader.getSize(), standardBus.TestRamSize });
+            if (try reader.getSize() > testBus.TestRamSize) {
+                try stderr.print("Test binary \"{s}\" too large: {d} out of a maximum of {d}\n", .{ boot_filename.?, try reader.getSize(), testBus.TestRamSize });
                 return 1;
             }
             reader.interface.readSliceAll(buf) catch |e| {
                 if (e != error.EndOfStream) return e;
             };
-            hart.loadProgramBytes(standardBus.TestRamStart, buf);
-            hart.loadProgram(standardBus.BootRomStart, &[_]u32{ riscv.assemble("lui ra, -524288"), riscv.assemble("jr ra, 0") });
+            hart.loadProgramBytes(testBus.TestRamStart, buf);
         } else {
             const buf = try allocator.alloc(u8, standardBus.BootRomSize);
             defer allocator.free(buf);

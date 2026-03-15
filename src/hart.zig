@@ -356,7 +356,7 @@ pub const Hart = struct {
             }
         }
 
-        try lines.append(allocator, try std.fmt.allocPrint(allocator, "pc: 0x{x:0>8}{s}\n", .{ self.read_registers_buf.pc, if (self.flush > 0) " (flush)" else "" }));
+        try lines.append(allocator, try std.fmt.allocPrint(allocator, "pc: 0x{x:0>8} (ins: 0x{x:08}) {s}\n", .{ self.read_registers_buf.pc, self.read_registers_buf.instruction, if (self.flush > 0) " (flush)" else "" }));
         const register_names = comptime a: {
             var names: [32][]const u8 = undefined;
             for (@typeInfo(@TypeOf(riscv.RegisterNames)).@"struct".fields, 0..) |f, i| {
@@ -408,7 +408,7 @@ pub const Hart = struct {
         var hprint = HighlightedPrint{ .allocator = allocator, .slice = buf };
         if (self.execute_buf.fw_rd != 0) {
             errdefer hprint.deinit();
-            const needle = try std.fmt.allocPrint(allocator, "{d}) ", .{self.execute_buf.fw_rd});
+            const needle = try std.fmt.allocPrint(allocator, "x{d}) ", .{self.execute_buf.fw_rd});
             hprint.hi_begin = std.mem.indexOf(u8, buf, needle) orelse unreachable;
             hprint.hi_begin += needle.len;
             hprint.hi_end = hprint.hi_begin + 10;
@@ -547,6 +547,13 @@ pub const Hart = struct {
         self.priv = .Machine;
         self.mcause = @intFromEnum(buf.exception.?);
         self.setPc(@as(u32, @bitCast(self.mtvec)) & 0xFFFF_FFFC);
+
+        // Custom halting condition on store to a specific address
+        if (buf.exception.? == .CustomHaltAddressWritten) {
+            self.fatal_exception = buf.exception.?;
+            return;
+        }
+
         // Exception handled
         buf.exception = null;
     }
@@ -723,7 +730,8 @@ pub const Hart = struct {
 
     fn executeAuipc(self: *@This(), buf: *ExecuteBuffer) void {
         // This accounts for pipeline steps, so the PC gotten is the address of this exact instruction
-        buf.res = self.pc -% 12 +% riscv.getUImmediate(buf.instruction);
+        _ = self;
+        buf.res = buf.pc +% riscv.getUImmediate(buf.instruction);
     }
 
     fn executeOp(self: *@This(), buf: *ExecuteBuffer) void {

@@ -701,6 +701,7 @@ pub const ExceptionCause = enum(u31) {
     DoubleTrap,
     SoftwareCheck = 18,
     HardwareError,
+    CustomHaltAddressWritten = 63, // If an address designated a halt address is stored to, raise this exception
     // Some more custom and reserved
     _,
 };

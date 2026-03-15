@@ -8,7 +8,15 @@ pub const MemoryError = error{
     InstructionAddressMisaligned,
     LoadAccessFault,
     StoreAccessFault,
+    HaltAddressWritten,
     // Load/StoreAccessMisaligned could potentially also be here, but we can support those easily
+};
+
+pub const AccessControl = struct {
+    read: bool = false,
+    write: bool = false,
+    execute: bool = false,
+    io: bool = false,
 };
 
 impl: *anyopaque,
