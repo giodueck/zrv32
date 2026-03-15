@@ -41,9 +41,17 @@
 
 - [x] Run program
 - [x] Step through program
-- [ ] Reset CPU
-- [ ] Intuitive controls
+- [x] Reset CPU
+- [x] Intuitive controls
+- [ ] Memory inspector
+- [ ] GUI for more flexible control over input and output
 
 ## Architecture
 
-- [ ] Generic Bus interface (to have different possible environments, e.g. riscv-test with _start at 0x8000_0000)
+- [x] Generic Bus interface (to have different possible environments, e.g. riscv-test with _start at 0x8000_0000)
+## Input/Output
+
+- [x] Text output
+- [ ] Text input
+- [ ] Color screen
+- [ ] Block device (storage device)

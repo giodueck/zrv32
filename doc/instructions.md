@@ -286,6 +286,23 @@ I-Type:
            MRET              0      PRIV     0         SYSTEM
 ```
 
+### CSR Instructions
+
+I-Type:
+```
+31                    20 19     15 14 12 11      7 6           0
+┌─┬─┬─┬─┬─┬─┬─┬─┬─┬─┬─┬─┬─┬─┬─┬─┬─┬─┬─┬─┬─┬─┬─┬─┬─┬─┬─┬─┬─┬─┬─┬─┐
+│           csr         │   rs1   │ f3  │   rd    │    opcode   │
+└─┴─┴─┴─┴─┴─┴─┴─┴─┴─┴─┴─┴─┴─┴─┴─┴─┴─┴─┴─┴─┴─┴─┴─┴─┴─┴─┴─┴─┴─┴─┴─┘
+            12               5       3       5           7
+       source/dest         source  CSRRW    dest       SYSTEM
+       source/dest         source  CSRRS    dest       SYSTEM
+       source/dest         source  CSRRC    dest       SYSTEM
+       source/dest       uimm[4:0] CSRRWI   dest       SYSTEM
+       source/dest       uimm[4:0] CSRRSI   dest       SYSTEM
+       source/dest       uimm[4:0] CSRRCI   dest       SYSTEM
+```
+
 ### HINT Instructions
 
 Most effectively-NOP instructions are reserved for use as hints to the microarchitecture. These can safely be ingnored
