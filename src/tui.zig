@@ -35,6 +35,13 @@ const Event = union(enum) {
     foo: u8,
 };
 
+const keybinds = [_][]const u8{
+    "<s> Step 1 cycle",
+    "<S> Step many cycles",
+    "<R> Reset hart",
+    "<q> Exit",
+};
+
 pub fn tuiMain(allocator: std.mem.Allocator, hart: *Hart) !void {
     // Initialize a tty
     var buffer: [1024]u8 = undefined;
@@ -105,11 +112,15 @@ pub fn tuiMain(allocator: std.mem.Allocator, hart: *Hart) !void {
     defer output_text_view_buffer.deinit(allocator);
 
     // Keybinds help line
-    const help_str = "Keybinds: <s> = Step 1 cycle | <S-s> = Step many cycles | <C-c>,<q> = Exit";
+    const help_str = "Keybinds: ";
     var help_view = TextView{ .scroll_view = .{ .vertical_scrollbar = .{ .character = .{ .grapheme = " ", .width = 0 } } } };
     var help_view_buffer = TextView.Buffer{};
     defer help_view_buffer.deinit(allocator);
     try help_view_buffer.update(allocator, .{ .bytes = help_str });
+    for (keybinds, 0..) |str, i| {
+        if (i > 0) try help_view_buffer.append(allocator, .{ .bytes = " | " });
+        try help_view_buffer.append(allocator, .{ .bytes = str });
+    }
 
     // Sends queries to terminal to detect certain features. This should always
     // be called after entering the alt screen, if you are using the alt screen
@@ -121,6 +132,7 @@ pub fn tuiMain(allocator: std.mem.Allocator, hart: *Hart) !void {
         var step = false;
         var step_many = false;
         const many_steps_count = 128;
+        var reset = false;
 
         // exhaustive switching ftw. Vaxis will send events if your Event enum
         // has the fields for those events
@@ -131,6 +143,7 @@ pub fn tuiMain(allocator: std.mem.Allocator, hart: *Hart) !void {
                 } else {
                     if (key.matches('s', .{})) step = true;
                     if (key.matches('S', .{})) step_many = true;
+                    if (key.matches('R', .{})) reset = true;
                 }
             },
 
@@ -175,6 +188,8 @@ pub fn tuiMain(allocator: std.mem.Allocator, hart: *Hart) !void {
             }
         } else if (step and !hart.ebreak and hart.fatal_exception == null) {
             hart.step();
+        } else if (reset) {
+            hart.reset();
         }
 
         // Real state
@@ -266,7 +281,7 @@ pub fn tuiMain(allocator: std.mem.Allocator, hart: *Hart) !void {
         const help_win = win.child(.{
             .x_off = 1,
             .y_off = 58,
-            .width = help_str.len + 1,
+            .width = @intCast(help_view_buffer.content.items.len + 1),
             .height = 1,
             .border = .{ .where = .none },
         });
