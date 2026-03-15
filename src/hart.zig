@@ -40,7 +40,6 @@ const ExecuteBuffer = struct {
     rd: u5 = 0,
     fw_rd: u5 = 0,
     fw_res: u32 = 0,
-    trap: ?riscv.Traps = null,
     exception: ?riscv.ExceptionCause = null,
 };
 
@@ -454,7 +453,6 @@ pub const Hart = struct {
         self.execute_buf.op1 = self.read_registers_buf.op1;
         self.execute_buf.op2 = self.read_registers_buf.op2;
         self.execute_buf.rd = self.read_registers_buf.rd;
-        self.execute_buf.trap = null;
         self.execute(&self.execute_buf);
         //  pipeline forward for next execute
         self.execute_buf.fw_res = self.execute_buf.res;
@@ -843,7 +841,7 @@ pub const Hart = struct {
                 riscv.Funct3.LOAD.lb, riscv.Funct3.LOAD.lbu => |value| {
                     buf.res = self.bus.load(buf.addr, 1) catch |e| err: {
                         if (e == Bus.MemoryError.LoadAccessFault) {
-                            buf.trap = riscv.Traps.LoadAccessFault;
+                            buf.exception = .LoadAccessFault;
                         } else if (e == Bus.MemoryError.IllegalInstruction) {
                             buf.exception = .IllegalInstruction;
                         }
@@ -856,7 +854,7 @@ pub const Hart = struct {
                 riscv.Funct3.LOAD.lh, riscv.Funct3.LOAD.lhu => |value| {
                     buf.res = self.bus.load(buf.addr, 2) catch |e| err: {
                         if (e == Bus.MemoryError.LoadAccessFault) {
-                            buf.trap = riscv.Traps.LoadAccessFault;
+                            buf.exception = .LoadAccessFault;
                         } else if (e == Bus.MemoryError.IllegalInstruction) {
                             buf.exception = .IllegalInstruction;
                         }
@@ -869,7 +867,7 @@ pub const Hart = struct {
                 riscv.Funct3.LOAD.lw => {
                     buf.res = self.bus.load(buf.addr, 4) catch |e| err: {
                         if (e == Bus.MemoryError.LoadAccessFault) {
-                            buf.trap = riscv.Traps.LoadAccessFault;
+                            buf.exception = .LoadAccessFault;
                         } else if (e == Bus.MemoryError.IllegalInstruction) {
                             buf.exception = .IllegalInstruction;
                         }
@@ -886,27 +884,33 @@ pub const Hart = struct {
                 riscv.Funct3.STORE.sb => {
                     self.bus.store(buf.addr, buf.op2, 1) catch |e| {
                         if (e == Bus.MemoryError.StoreAccessFault) {
-                            buf.trap = riscv.Traps.StoreAccessFault;
+                            buf.exception = .StoreAccessFault;
                         } else if (e == Bus.MemoryError.IllegalInstruction) {
                             buf.exception = .IllegalInstruction;
+                        } else if (e == Bus.MemoryError.HaltAddressWritten) {
+                            buf.exception = .CustomHaltAddressWritten;
                         }
                     };
                 },
                 riscv.Funct3.STORE.sh => {
                     self.bus.store(buf.addr, buf.op2, 2) catch |e| {
                         if (e == Bus.MemoryError.StoreAccessFault) {
-                            buf.trap = riscv.Traps.StoreAccessFault;
+                            buf.exception = .StoreAccessFault;
                         } else if (e == Bus.MemoryError.IllegalInstruction) {
                             buf.exception = .IllegalInstruction;
+                        } else if (e == Bus.MemoryError.HaltAddressWritten) {
+                            buf.exception = .CustomHaltAddressWritten;
                         }
                     };
                 },
                 riscv.Funct3.STORE.sw => {
                     self.bus.store(buf.addr, buf.op2, 4) catch |e| {
                         if (e == Bus.MemoryError.StoreAccessFault) {
-                            buf.trap = riscv.Traps.StoreAccessFault;
+                            buf.exception = .StoreAccessFault;
                         } else if (e == Bus.MemoryError.IllegalInstruction) {
                             buf.exception = .IllegalInstruction;
+                        } else if (e == Bus.MemoryError.HaltAddressWritten) {
+                            buf.exception = .CustomHaltAddressWritten;
                         }
                     };
                 },

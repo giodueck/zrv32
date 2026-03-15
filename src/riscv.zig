@@ -679,20 +679,6 @@ pub const RegisterAliases = .{
     .t6 = 31,
 };
 
-pub const Traps = enum(u4) {
-    None = 0,
-    IllegalInstruction,
-    EnvironmentCall,
-    LoadAccessMisaligned,
-    LoadAccessFault,
-    StoreAccessMisaligned,
-    StoreAccessFault,
-    InstructionAccessFault,
-    InstructionAddressMisaligned,
-    Misc = 15,
-    _,
-};
-
 pub const Exception = error{
     IllegalInstruction,
 };
