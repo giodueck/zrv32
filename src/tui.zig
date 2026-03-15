@@ -66,9 +66,6 @@ pub fn tuiMain(allocator: std.mem.Allocator, hart: *Hart) !void {
     // Optionally enter the alternate screen
     try vx.enterAltScreen(tty.writer());
 
-    // We'll adjust the color index every keypress for the border
-    var color_idx: u8 = 0;
-
     // Real state view
     var state_text_view = TextView{ .scroll_view = .{ .vertical_scrollbar = .{ .character = .{ .grapheme = " " } } } };
     var state_text_view_buffer = TextView.Buffer{};
@@ -129,8 +126,6 @@ pub fn tuiMain(allocator: std.mem.Allocator, hart: *Hart) !void {
             else => {},
         }
 
-        if (step) color_idx +%= 1;
-
         // vx.window() returns the root window. This window is the size of the
         // terminal and can spawn child windows as logical areas. Child windows
         // cannot draw outside of their bounds
@@ -141,9 +136,9 @@ pub fn tuiMain(allocator: std.mem.Allocator, hart: *Hart) !void {
         // the old and only updated cells will be drawn
         win.clear();
 
-        // Create a style
+        // Create a style for the borders
         const style: vaxis.Style = .{
-            .fg = .{ .index = color_idx },
+            .fg = .{ .index = 4 },
         };
 
         // Step the emulator, if appropriate
