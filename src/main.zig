@@ -85,10 +85,12 @@ pub fn main() !u8 {
     defer bus.deinit();
     var hart: Hart = .{ .bus = bus.interface() };
 
-    var boot_loaded = false;
-    var program_loaded = false;
     var stdout_mode = false;
     var do_test = false;
+    var boot_fd: ?std.fs.File = null;
+    var boot_filename: ?[]u8 = null;
+    var program_fd: ?std.fs.File = null;
+    var program_filename: ?[]u8 = null;
 
     // We use the streaming parser, so we consume each argument individually
     while (cla_parser.next() catch |err| {
@@ -113,50 +115,12 @@ pub fn main() !u8 {
                 do_test = true;
             },
             'b' => {
-                if (do_test) {
-                    var fd = try std.fs.cwd().openFile(arg.value.?, .{ .mode = .read_only });
-                    defer fd.close();
-                    const buf = try arena.allocator().alloc(u8, standardBus.TestRamSize);
-                    var reader = fd.reader(buf);
-                    if (try reader.getSize() > standardBus.TestRamSize) {
-                        try stderr.print("Test binary \"{s}\" too large: {d} out of a maximum of {d}\n", .{ arg.value.?, try reader.getSize(), standardBus.TestRamSize });
-                        return 1;
-                    }
-                    reader.interface.readSliceAll(buf) catch |e| {
-                        if (e != error.EndOfStream) return e;
-                    };
-                    hart.loadProgramBytes(standardBus.TestRamStart, buf);
-                    hart.loadProgram(standardBus.BootRomStart, &[_]u32{ riscv.assemble("lui ra, -524288"), riscv.assemble("jr ra, 0") });
-                } else {
-                    var fd = try std.fs.cwd().openFile(arg.value.?, .{ .mode = .read_only });
-                    defer fd.close();
-                    const buf = try arena.allocator().alloc(u8, standardBus.BootRomSize);
-                    var reader = fd.reader(buf);
-                    if (try reader.getSize() > standardBus.BootRomSize) {
-                        try stderr.print("Boot binary \"{s}\" too large: {d} out of a maximum of {d}\n", .{ arg.value.?, try reader.getSize(), standardBus.BootRomSize });
-                        return 1;
-                    }
-                    reader.interface.readSliceAll(buf) catch |e| {
-                        if (e != error.EndOfStream) return e;
-                    };
-                    hart.loadProgramBytes(standardBus.BootRomStart, buf);
-                }
-                boot_loaded = true;
+                boot_fd = try std.fs.cwd().openFile(arg.value.?, .{ .mode = .read_only });
+                boot_filename = try allocator.dupe(u8, arg.value.?);
             },
             'x' => {
-                var fd = try std.fs.cwd().openFile(arg.value.?, .{ .mode = .read_only });
-                defer fd.close();
-                const buf = try arena.allocator().alloc(u8, standardBus.ProgramRomSize);
-                var reader = fd.reader(buf);
-                if (try reader.getSize() > standardBus.ProgramRomSize) {
-                    try stderr.print("Program binary \"{s}\" too large: {d} out of a maximum of {d}\n", .{ arg.value.?, try reader.getSize(), standardBus.ProgramRomSize });
-                    return 1;
-                }
-                reader.interface.readSliceAll(buf) catch |e| {
-                    if (e != error.EndOfStream) return e;
-                };
-                hart.loadProgramBytes(standardBus.ProgramRomStart, buf);
-                program_loaded = true;
+                program_fd = try std.fs.cwd().openFile(arg.value.?, .{ .mode = .read_only });
+                program_filename = try allocator.dupe(u8, arg.value.?);
             },
             else => unreachable,
         }
@@ -167,13 +131,61 @@ pub fn main() !u8 {
 
     // Command-line argument parsing done
 
-    if (!boot_loaded) {
+    if (boot_fd) |fd| {
+        if (do_test) {
+            const buf = try allocator.alloc(u8, standardBus.TestRamSize);
+            defer allocator.free(buf);
+            var reader = fd.reader(buf);
+            if (try reader.getSize() > standardBus.TestRamSize) {
+                try stderr.print("Test binary \"{s}\" too large: {d} out of a maximum of {d}\n", .{ boot_filename.?, try reader.getSize(), standardBus.TestRamSize });
+                return 1;
+            }
+            reader.interface.readSliceAll(buf) catch |e| {
+                if (e != error.EndOfStream) return e;
+            };
+            hart.loadProgramBytes(standardBus.TestRamStart, buf);
+            hart.loadProgram(standardBus.BootRomStart, &[_]u32{ riscv.assemble("lui ra, -524288"), riscv.assemble("jr ra, 0") });
+        } else {
+            const buf = try allocator.alloc(u8, standardBus.BootRomSize);
+            defer allocator.free(buf);
+            var reader = fd.reader(buf);
+            if (try reader.getSize() > standardBus.BootRomSize) {
+                try stderr.print("Boot binary \"{s}\" too large: {d} out of a maximum of {d}\n", .{ boot_filename.?, try reader.getSize(), standardBus.BootRomSize });
+                return 1;
+            }
+            reader.interface.readSliceAll(buf) catch |e| {
+                if (e != error.EndOfStream) return e;
+            };
+            hart.loadProgramBytes(standardBus.BootRomStart, buf);
+        }
+
+        allocator.free(boot_filename.?);
+        boot_filename = null;
+        fd.close();
+    } else {
         try stderr.print("Error: No boot binary program loaded, aborting\n", .{});
         try stderr.writeAll(usage_str);
         try stderr.flush();
         return 1;
     }
-    if (!program_loaded) {
+
+    if (program_fd) |fd| {
+        const buf = try allocator.alloc(u8, standardBus.ProgramRomSize);
+        defer allocator.free(buf);
+        var reader = fd.reader(buf);
+        if (try reader.getSize() > standardBus.ProgramRomSize) {
+            try stderr.print("Program binary \"{s}\" too large: {d} out of a maximum of {d}\n", .{ program_filename.?, try reader.getSize(), standardBus.ProgramRomSize });
+            return 1;
+        }
+        reader.interface.readSliceAll(buf) catch |e| {
+            if (e != error.EndOfStream) return e;
+        };
+        hart.loadProgramBytes(standardBus.ProgramRomStart, buf);
+
+        allocator.free(program_filename.?);
+        program_filename = null;
+        fd.close();
+    } else {
         try stderr.print("Warning: No program binary loaded\n", .{});
         try stderr.flush();
     }
