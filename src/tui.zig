@@ -104,6 +104,13 @@ pub fn tuiMain(allocator: std.mem.Allocator, hart: *Hart) !void {
     var output_text_view_buffer = TextView.Buffer{};
     defer output_text_view_buffer.deinit(allocator);
 
+    // Keybinds help line
+    const help_str = "Keybinds: <s> = Step 1 cycle | <S-s> = Step many cycles | <C-c>,<q> = Exit";
+    var help_view = TextView{ .scroll_view = .{ .vertical_scrollbar = .{ .character = .{ .grapheme = " ", .width = 0 } } } };
+    var help_view_buffer = TextView.Buffer{};
+    defer help_view_buffer.deinit(allocator);
+    try help_view_buffer.update(allocator, .{ .bytes = help_str });
+
     // Sends queries to terminal to detect certain features. This should always
     // be called after entering the alt screen, if you are using the alt screen
     try vx.queryTerminal(tty.writer(), 1 * std.time.ns_per_s);
@@ -112,17 +119,18 @@ pub fn tuiMain(allocator: std.mem.Allocator, hart: *Hart) !void {
         // nextEvent blocks until an event is in the queue
         const event = loop.nextEvent();
         var step = false;
+        var step_many = false;
+        const many_steps_count = 128;
 
         // exhaustive switching ftw. Vaxis will send events if your Event enum
-        // has the fields for those events (ie "key_press", "winsize")
+        // has the fields for those events
         switch (event) {
             .key_press => |key| {
                 if (key.matches('c', .{ .ctrl = true }) or key.matches('q', .{})) {
                     break;
-                } else if (key.matches('l', .{ .ctrl = true })) {
-                    vx.queueRefresh();
                 } else {
                     if (key.matches('s', .{})) step = true;
+                    if (key.matches('S', .{})) step_many = true;
                 }
             },
 
@@ -160,7 +168,12 @@ pub fn tuiMain(allocator: std.mem.Allocator, hart: *Hart) !void {
         };
 
         // Step the emulator, if appropriate
-        if (step and !hart.ebreak and hart.fatal_exception == null) {
+        if (step_many) {
+            for (0..many_steps_count) |_| {
+                if (hart.ebreak or hart.fatal_exception != null) break;
+                hart.step();
+            }
+        } else if (step and !hart.ebreak and hart.fatal_exception == null) {
             hart.step();
         }
 
@@ -194,9 +207,9 @@ pub fn tuiMain(allocator: std.mem.Allocator, hart: *Hart) !void {
         // Logical state
         const logical_state_win = win.child(.{
             .x_off = 2,
-            .y_off = 31,
+            .y_off = 30,
             .width = 50,
-            .height = 28,
+            .height = 19,
             .border = .{
                 .where = .all,
                 .style = style,
@@ -208,7 +221,7 @@ pub fn tuiMain(allocator: std.mem.Allocator, hart: *Hart) !void {
         };
 
         // This string will have highlights, which we must manually apply by setting a style
-        var logical_state_str = try hart.allocPrintExecState(allocator);
+        var logical_state_str = try hart.allocPrintLogicalState(allocator);
         defer logical_state_str.deinit();
         try logical_state_text_view_buffer.update(allocator, .{ .bytes = logical_state_str.slice });
         try logical_state_text_view_buffer.updateStyle(allocator, .{ .style = highlight_style, .begin = logical_state_str.hi_begin, .end = logical_state_str.hi_end });
@@ -217,7 +230,7 @@ pub fn tuiMain(allocator: std.mem.Allocator, hart: *Hart) !void {
         // Logical state title
         const logical_state_title_win = win.child(.{
             .x_off = 4,
-            .y_off = 31,
+            .y_off = 30,
             .width = logical_state_view_title.len + 1,
             .height = 1,
             .border = .{ .where = .none },
@@ -229,14 +242,14 @@ pub fn tuiMain(allocator: std.mem.Allocator, hart: *Hart) !void {
             .x_off = state_win.x_off + state_win.width + 2,
             .y_off = 0,
             .width = 80,
-            .height = 28,
+            .height = 30,
             .border = .{
                 .where = .all,
                 .style = style,
             },
         });
 
-        // Logical state title
+        // Text output title
         const output_title_win = win.child(.{
             .x_off = state_win.x_off + state_win.width + 4,
             .y_off = 0,
@@ -248,6 +261,17 @@ pub fn tuiMain(allocator: std.mem.Allocator, hart: *Hart) !void {
 
         try output_text_view_buffer.update(allocator, .{ .bytes = raw_output_writer.written() });
         output_text_view.draw(output_win, output_text_view_buffer);
+
+        // Help text
+        const help_win = win.child(.{
+            .x_off = 1,
+            .y_off = 58,
+            .width = help_str.len + 1,
+            .height = 1,
+            .border = .{ .where = .none },
+        });
+
+        help_view.draw(help_win, help_view_buffer);
 
         // Render the screen. Using a buffered writer will offer much better
         // performance, but is not required

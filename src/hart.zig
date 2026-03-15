@@ -317,6 +317,9 @@ pub const Hart = struct {
         try lines.append(allocator, try std.fmt.allocPrint(allocator, "\n", .{}));
         try lines.append(allocator, try std.fmt.allocPrint(allocator, "cycle = 0x{x:016}\n", .{self.mcycle}));
         try lines.append(allocator, try std.fmt.allocPrint(allocator, "instret = 0x{x:016}\n", .{self.minstret}));
+        if (self.fatal_exception != null) {
+            try lines.append(allocator, try std.fmt.allocPrint(allocator, "\nFatal exception: {s}\n", .{@tagName(self.fatal_exception.?)}));
+        }
 
         var count: usize = 0;
         for (lines.items) |line| {
@@ -326,9 +329,6 @@ pub const Hart = struct {
         var ret = std.ArrayList(u8).initBuffer(buf);
         for (lines.items) |line| {
             ret.appendSliceAssumeCapacity(line);
-        }
-        if (self.fatal_exception != null) {
-            try lines.append(allocator, try std.fmt.allocPrint(allocator, "\nError: Fatal unhandled exception\n", .{}));
         }
         return buf;
     }
@@ -345,9 +345,9 @@ pub const Hart = struct {
     };
 
     /// Debugging method to print the current Hart state to an allocated string.
-    /// The point of view is from the Execute and memory access pipeline step, including flushes and forwarded values.
+    /// The point of view is from the Execute and memory access pipeline step, including flushes and forwarded values. The output does not include CSRs and priv, as that is already present in allocPrintState.
     /// The returned HighlightedPrint must be freed by calling the member function deinit().
-    pub fn allocPrintExecState(self: @This(), allocator: std.mem.Allocator) !HighlightedPrint {
+    pub fn allocPrintLogicalState(self: @This(), allocator: std.mem.Allocator) !HighlightedPrint {
         var lines = std.ArrayList([]u8).empty;
         defer lines.deinit(allocator);
         defer {
@@ -382,17 +382,6 @@ pub const Hart = struct {
         for (0..16) |i| {
             try lines.append(allocator, try std.fmt.allocPrint(allocator, "{s: >4} ({s: >3}) 0x{x:08} | {s: >4} ({s: >3}) 0x{x:08}\n", .{ register_aliases[i * 2], register_names[i * 2], register_values[i * 2], register_aliases[i * 2 + 1], register_names[i * 2 + 1], register_values[i * 2 + 1] }));
         }
-        try lines.append(allocator, try std.fmt.allocPrint(allocator, "\n(priv) = {d} {s}\n", .{ @intFromEnum(self.priv), @tagName(self.priv) }));
-        const mpp = @as(riscv.Priv, @enumFromInt(self.mstatus.mpp));
-        try lines.append(allocator, try std.fmt.allocPrint(allocator, "mstatus = 0x{x:08} (MPP = {d} {s})\n", .{ @as(u32, @bitCast(self.mstatus)), @intFromEnum(mpp), @tagName(mpp) }));
-        try lines.append(allocator, try std.fmt.allocPrint(allocator, "mscratch = 0x{x:08}\n", .{self.mscratch}));
-        try lines.append(allocator, try std.fmt.allocPrint(allocator, "mtvec = 0x{x:08}\n", .{@as(u32, @bitCast(self.mtvec))}));
-        try lines.append(allocator, try std.fmt.allocPrint(allocator, "mepc = 0x{x:08} | mtval = 0x{x:08}\n", .{ self.mepc, self.mtval }));
-        try lines.append(allocator, try std.fmt.allocPrint(allocator, "mcause = 0x{x:08}", .{self.mcause}));
-        if (self.mtval != 0) try lines.append(allocator, try std.fmt.allocPrint(allocator, " ({s})", .{@tagName(@as(riscv.ExceptionCause, @enumFromInt(self.mcause)))}));
-        try lines.append(allocator, try std.fmt.allocPrint(allocator, "\n", .{}));
-        try lines.append(allocator, try std.fmt.allocPrint(allocator, "cycle = 0x{x:016}\n", .{self.mcycle}));
-        try lines.append(allocator, try std.fmt.allocPrint(allocator, "instret = 0x{x:016}\n", .{self.minstret}));
 
         var count: usize = 0;
         for (lines.items) |line| {
