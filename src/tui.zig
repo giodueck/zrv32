@@ -71,15 +71,33 @@ pub fn tuiMain(allocator: std.mem.Allocator, hart: *Hart) !void {
     var state_text_view_buffer = TextView.Buffer{};
     defer state_text_view_buffer.deinit(allocator);
 
+    const state_view_title = "Current Hart State";
+    var state_title_view = TextView{ .scroll_view = .{ .vertical_scrollbar = .{ .character = .{ .grapheme = " ", .width = 0 } } } };
+    var state_title_view_buffer = TextView.Buffer{};
+    defer state_title_view_buffer.deinit(allocator);
+    try state_title_view_buffer.update(allocator, .{ .bytes = state_view_title });
+
     // Logical (from the execution state PoV) state view
     var logical_state_text_view = TextView{ .scroll_view = .{ .vertical_scrollbar = .{ .character = .{ .grapheme = " " } } } };
     var logical_state_text_view_buffer = TextView.Buffer{};
     defer logical_state_text_view_buffer.deinit(allocator);
 
+    const logical_state_view_title = "Logical Hart State";
+    var logical_state_title_view = TextView{ .scroll_view = .{ .vertical_scrollbar = .{ .character = .{ .grapheme = " ", .width = 0 } } } };
+    var logical_state_title_view_buffer = TextView.Buffer{};
+    defer logical_state_title_view_buffer.deinit(allocator);
+    try logical_state_title_view_buffer.update(allocator, .{ .bytes = logical_state_view_title });
+
     // Text output writer
     var raw_output_writer = std.io.Writer.Allocating.init(allocator);
     defer raw_output_writer.deinit();
     hart.bus.setCharDevWriter(&raw_output_writer.writer);
+
+    const output_view_title = "Output";
+    var output_title_view = TextView{ .scroll_view = .{ .vertical_scrollbar = .{ .character = .{ .grapheme = " ", .width = 0 } } } };
+    var output_title_view_buffer = TextView.Buffer{};
+    defer output_title_view_buffer.deinit(allocator);
+    try output_title_view_buffer.update(allocator, .{ .bytes = output_view_title });
 
     // Text output view
     var output_text_view = TextView{ .scroll_view = .{ .vertical_scrollbar = .{ .character = .{ .grapheme = " " } } } };
@@ -149,7 +167,7 @@ pub fn tuiMain(allocator: std.mem.Allocator, hart: *Hart) !void {
         // Real state
         const state_win = win.child(.{
             .x_off = 2,
-            .y_off = 1,
+            .y_off = 0,
             .width = 50,
             .height = 30,
             .border = .{
@@ -163,10 +181,20 @@ pub fn tuiMain(allocator: std.mem.Allocator, hart: *Hart) !void {
         try state_text_view_buffer.update(allocator, .{ .bytes = state_str });
         state_text_view.draw(state_win, state_text_view_buffer);
 
+        // Real state title
+        const state_title_win = win.child(.{
+            .x_off = 4,
+            .y_off = 0,
+            .width = state_view_title.len + 1,
+            .height = 1,
+            .border = .{ .where = .none },
+        });
+        state_title_view.draw(state_title_win, state_title_view_buffer);
+
         // Logical state
         const logical_state_win = win.child(.{
             .x_off = 2,
-            .y_off = 32,
+            .y_off = 31,
             .width = 50,
             .height = 28,
             .border = .{
@@ -186,11 +214,37 @@ pub fn tuiMain(allocator: std.mem.Allocator, hart: *Hart) !void {
         try logical_state_text_view_buffer.updateStyle(allocator, .{ .style = highlight_style, .begin = logical_state_str.hi_begin, .end = logical_state_str.hi_end });
         logical_state_text_view.draw(logical_state_win, logical_state_text_view_buffer);
 
+        // Logical state title
+        const logical_state_title_win = win.child(.{
+            .x_off = 4,
+            .y_off = 31,
+            .width = logical_state_view_title.len + 1,
+            .height = 1,
+            .border = .{ .where = .none },
+        });
+        logical_state_title_view.draw(logical_state_title_win, logical_state_title_view_buffer);
+
         // Text output
-        const output_win = win.child(.{ .x_off = state_win.x_off + state_win.width + 2, .y_off = 1, .width = 80, .height = 28, .border = .{
-            .where = .all,
-            .style = style,
-        } });
+        const output_win = win.child(.{
+            .x_off = state_win.x_off + state_win.width + 2,
+            .y_off = 0,
+            .width = 80,
+            .height = 28,
+            .border = .{
+                .where = .all,
+                .style = style,
+            },
+        });
+
+        // Logical state title
+        const output_title_win = win.child(.{
+            .x_off = state_win.x_off + state_win.width + 4,
+            .y_off = 0,
+            .width = output_view_title.len + 1,
+            .height = 1,
+            .border = .{ .where = .none },
+        });
+        output_title_view.draw(output_title_win, output_title_view_buffer);
 
         try output_text_view_buffer.update(allocator, .{ .bytes = raw_output_writer.written() });
         output_text_view.draw(output_win, output_text_view_buffer);
