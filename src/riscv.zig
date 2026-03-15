@@ -901,7 +901,7 @@ pub fn getSImmediate(instr: u32) u32 {
     var ret: u32 = @as(u32, decoded.imml) + (@as(u32, @as(u7, @bitCast(decoded.immh))) << 5);
     // Sign-extend
     if (instr >> 31 == 1) {
-        ret |= @truncate(0xFFFF_FFFF << 13);
+        ret |= @truncate(0xFFFF_FFFF << 12);
     }
     return ret;
 }
