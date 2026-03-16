@@ -146,7 +146,11 @@ pub const Funct3 = .{
         .csrrwi = 0b101,
         .csrrsi = 0b110,
         .csrrci = 0b111,
-    }
+    },
+    .MISC_MEM = .{
+        .fence  = 0b000,
+        .fencei = 0b001,
+    },
 };
 
 // zig fmt: on

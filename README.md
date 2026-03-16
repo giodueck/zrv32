@@ -14,7 +14,7 @@ in Factorio's Circuit Network.
 
 Potential goals: Run Linux on the emulated CPU; add Factorio-specific extensions
 - [x] Exceptions, interrupts and traps
-- [ ] Zifencei: Instruction-Fetch fence
+- [x] Zifencei: Instruction-Fetch fence
 - [ ] A: Atomic operations
 - [x] Zicsr: Control Status Register operations
 - [ ] Zicntr: extension for counters

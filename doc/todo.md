@@ -35,6 +35,7 @@
 ## Extensions
 
 - [x] Zicsr extension (and machine/user mode privilege)
+- [x] Zifencei extension
 - [ ] M extension
 
 ## Interactive emulator

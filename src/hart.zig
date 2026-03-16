@@ -267,7 +267,7 @@ pub const Hart = struct {
         };
         for (0..16) |i| {
             try writer.print("{s: >4} ({s: >3}) 0x{x:08} | {s: >4} ({s: >3}) 0x{x:08}\n", .{ register_aliases[i * 2], register_names[i * 2], self.registers[i * 2], register_aliases[i * 2 + 1], register_names[i * 2 + 1], self.registers[i * 2 + 1] });
-        try writer.flush();
+            try writer.flush();
         }
         try writer.print("\n(priv) = {d} {s}\n", .{ @intFromEnum(self.priv), @tagName(self.priv) });
         const mpp = @as(riscv.Priv, @enumFromInt(self.mstatus.mpp));
@@ -327,7 +327,9 @@ pub const Hart = struct {
         try lines.append(allocator, try std.fmt.allocPrint(allocator, "cycle = 0x{x:016}\n", .{self.mcycle}));
         try lines.append(allocator, try std.fmt.allocPrint(allocator, "instret = 0x{x:016}\n", .{self.minstret}));
         if (self.fatal_exception != null) {
-            try lines.append(allocator, try std.fmt.allocPrint(allocator, "\nFatal exception: {s}\n", .{@tagName(self.fatal_exception.?)}));
+            try lines.append(allocator, try std.fmt.allocPrint(allocator, "\nHalt: Fatal exception: {s}\n", .{@tagName(self.fatal_exception.?)}));
+        } else if (self.ebreak) {
+            try lines.append(allocator, try std.fmt.allocPrint(allocator, "\nHalt: M-Mode Breakpoint hit\n", .{}));
         }
 
         var count: usize = 0;
@@ -595,7 +597,7 @@ pub const Hart = struct {
             .R => |value| {
                 switch (value.opcode) {
                     @intFromEnum(riscv.Opcode.OP) => {
-                        executeOp(self, buf);
+                        self.executeOp();
                     },
                     else => {
                         buf.exception = .IllegalInstruction;
@@ -605,21 +607,19 @@ pub const Hart = struct {
             .I => |value| {
                 switch (value.opcode) {
                     @intFromEnum(riscv.Opcode.LOAD) => {
-                        executeMemoryAccess(self, buf);
+                        self.executeMemoryAccess();
                     },
                     @intFromEnum(riscv.Opcode.MISC_MEM) => {
-                        // Memory access is entirely sequential and we only have one core anyways,
-                        // so FENCE will be a NOP.
-                        // PAUSE is also a NOP.
+                        self.executeMiscMem();
                     },
                     @intFromEnum(riscv.Opcode.OP_IMM) => {
-                        executeOpImm(self, buf);
+                        self.executeOpImm();
                     },
                     @intFromEnum(riscv.Opcode.JALR) => {
-                        executeJalr(self, buf);
+                        self.executeJalr();
                     },
                     @intFromEnum(riscv.Opcode.SYSTEM) => {
-                        executeSystem(self, buf);
+                        self.executeSystem();
                     },
                     else => {
                         buf.exception = .IllegalInstruction;
@@ -629,7 +629,7 @@ pub const Hart = struct {
             .S => |value| {
                 switch (value.opcode) {
                     @intFromEnum(riscv.Opcode.STORE) => {
-                        executeMemoryAccess(self, buf);
+                        self.executeMemoryAccess();
                     },
                     else => {
                         buf.exception = .IllegalInstruction;
@@ -639,7 +639,7 @@ pub const Hart = struct {
             .B => |value| {
                 switch (value.opcode) {
                     @intFromEnum(riscv.Opcode.BRANCH) => {
-                        executeBranch(self, buf);
+                        self.executeBranch();
                     },
                     else => {
                         buf.exception = .IllegalInstruction;
@@ -649,10 +649,10 @@ pub const Hart = struct {
             .U => |value| {
                 switch (value.opcode) {
                     @intFromEnum(riscv.Opcode.LUI) => {
-                        executeLui(self, buf);
+                        self.executeLui();
                     },
                     @intFromEnum(riscv.Opcode.AUIPC) => {
-                        executeAuipc(self, buf);
+                        self.executeAuipc();
                     },
                     else => {
                         buf.exception = .IllegalInstruction;
@@ -662,7 +662,7 @@ pub const Hart = struct {
             .J => |value| {
                 switch (value.opcode) {
                     @intFromEnum(riscv.Opcode.JAL) => {
-                        executeJal(self, buf);
+                        self.executeJal();
                     },
                     else => {
                         buf.exception = .IllegalInstruction;
@@ -675,8 +675,8 @@ pub const Hart = struct {
         }
     }
 
-    fn executeOpImm(self: *@This(), buf: *ExecuteBuffer) void {
-        _ = self;
+    fn executeOpImm(self: *@This()) void {
+        const buf = &self.execute_buf;
         const decoded: riscv.ITypeInstruction = @bitCast(buf.instruction);
         switch (decoded.funct3) {
             riscv.Funct3.OP_IMM.addi => {
@@ -721,19 +721,19 @@ pub const Hart = struct {
         }
     }
 
-    fn executeLui(self: *@This(), buf: *ExecuteBuffer) void {
-        _ = self;
+    fn executeLui(self: *@This()) void {
+        const buf = &self.execute_buf;
         buf.res = riscv.getUImmediate(buf.instruction);
     }
 
-    fn executeAuipc(self: *@This(), buf: *ExecuteBuffer) void {
+    fn executeAuipc(self: *@This()) void {
         // This accounts for pipeline steps, so the PC gotten is the address of this exact instruction
-        _ = self;
+        const buf = &self.execute_buf;
         buf.res = buf.pc +% riscv.getUImmediate(buf.instruction);
     }
 
-    fn executeOp(self: *@This(), buf: *ExecuteBuffer) void {
-        _ = self;
+    fn executeOp(self: *@This()) void {
+        const buf = &self.execute_buf;
         const decoded: riscv.RTypeInstruction = @bitCast(buf.instruction);
         switch (decoded.funct3) {
             riscv.Funct3.OP.add => {
@@ -785,17 +785,20 @@ pub const Hart = struct {
         }
     }
 
-    fn executeJal(self: *@This(), buf: *ExecuteBuffer) void {
+    fn executeJal(self: *@This()) void {
+        const buf = &self.execute_buf;
         buf.res = buf.pc +% 4;
         self.setPc(buf.pc +% riscv.getJImmediate(buf.instruction));
     }
 
-    fn executeJalr(self: *@This(), buf: *ExecuteBuffer) void {
+    fn executeJalr(self: *@This()) void {
+        const buf = &self.execute_buf;
         buf.res = buf.pc +% 4;
         self.setPc(riscv.getIImmediate(buf.instruction) +% buf.op1);
     }
 
-    fn executeBranch(self: *@This(), buf: *ExecuteBuffer) void {
+    fn executeBranch(self: *@This()) void {
+        const buf = &self.execute_buf;
         const dest = buf.pc +% riscv.getBImmediate(buf.instruction);
         switch (buf.decoded.B.funct3) {
             riscv.Funct3.BRANCH.beq => {
@@ -839,7 +842,8 @@ pub const Hart = struct {
     }
 
     /// Executes memory access operations like LOAD and STORE
-    fn executeMemoryAccess(self: *@This(), buf: *ExecuteBuffer) void {
+    fn executeMemoryAccess(self: *@This()) void {
+        const buf = &self.execute_buf;
         const decoded: riscv.ITypeInstruction = @bitCast(buf.instruction);
         if (decoded.opcode == @intFromEnum(riscv.Opcode.LOAD)) {
             buf.addr = buf.op1 +% riscv.getIImmediate(buf.instruction);
@@ -927,7 +931,8 @@ pub const Hart = struct {
         }
     }
 
-    fn executeSystem(self: *@This(), buf: *ExecuteBuffer) void {
+    fn executeSystem(self: *@This()) void {
+        const buf = &self.execute_buf;
         const decoded = buf.decoded.I;
         switch (decoded.funct3) {
             riscv.Funct3.SYSTEM.priv => {
@@ -1015,6 +1020,27 @@ pub const Hart = struct {
             else => {
                 buf.exception = .IllegalInstruction;
             },
+        }
+    }
+
+    fn executeMiscMem(self: *@This()) void {
+        const buf = &self.execute_buf;
+        const decoded: riscv.ITypeInstruction = @bitCast(buf.instruction);
+        switch (decoded.funct3) {
+            riscv.Funct3.MISC_MEM.fence => {
+                // Memory access is entirely sequential and we only have one hart anyways,
+                // so FENCE will be a NOP.
+                // PAUSE is also a NOP.
+                return;
+            },
+            riscv.Funct3.MISC_MEM.fencei => {
+                // Flush instruction pipeline to fetch instructions again, in case they were written to.
+                // Not a jump, we still only go to the next instruction.
+                self.setPc(buf.pc +% 4);
+            },
+            else => {
+                buf.exception = .IllegalInstruction;
+            }
         }
     }
 
