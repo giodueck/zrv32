@@ -233,22 +233,6 @@ pub fn main() !u8 {
         try tui.tuiMain(allocator, &hart);
     }
 
-    // API needs:
-    //  - Load program
-    //  - Set initial state of CPU
-    //  - Run single cycle of CPU (advance each pipeline stage once)
-    //  - Run single instruction (not always one cycle, runs until an instruction finishes its last stage and wasn't flushed by a branch)
-    //  - By extension:
-    //      - Run N cycles
-    //      - Run N instructions
-    //  - Run until halt (which shouldn't exist on "bare metal" but still, maybe define a set of halting conditions)
-    //  - Run until breakpoint
-    //
-    // Testing needs:
-    //  - Initialize at custom state
-    //  - Interpret instructions
-    //  - Run single instruction
-
     return 0;
 }
 
