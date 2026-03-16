@@ -32,12 +32,12 @@ for test in $(ls $TEST_PATH | grep -e $REGEX_TEST_FILTER); do
     riscv32-unknown-elf-objcopy -O binary "$TEST_PATH/$test" "$TMPDIR/$test.bin"
     printf "%s:\r\t\t\t" "$test"
     haltaddr=$(printf "0x%x" $((0x$(riscv32-unknown-elf-readelf "$TEST_PATH/$test" -s | grep " tohost" | xargs | cut -d' ' -f2)+4)))
-    gp=$(timeout 2 ./zig-out/bin/zrv32 -t "$TMPDIR/$test.bin" -s --haltaddr="$haltaddr" 2>&1 | cut -d"|" -f2 | grep -e 'gp' | cut -d")" -f2 | xargs)
+    gp=$(timeout 2 ./zig-out/bin/zrv32 -t "$TMPDIR/$test.bin" -s --haltaddr="$haltaddr" 2>/dev/null | cut -d"|" -f2 | grep -e 'gp' | cut -d")" -f2 | xargs)
     if [ -z "$gp" ]; then
         printf "${RED}FAIL${RESET}: Timed out\n"
         continue
     fi
-    a0=$(./zig-out/bin/zrv32 -t "$TMPDIR/$test.bin" -s --haltaddr="$haltaddr" 2>&1 | cut -d"|" -f1 | grep -e 'a0' | cut -d")" -f2 | xargs)
+    a0=$(./zig-out/bin/zrv32 -t "$TMPDIR/$test.bin" -s --haltaddr="$haltaddr" 2>/dev/null | cut -d"|" -f1 | grep -e 'a0' | cut -d")" -f2 | xargs)
     if [ "$gp" != "0x00000001" ] || [ "$a0" != "0x00000000" ]; then
         printf "${RED}FAIL${RESET}: gp = $gp, a0 = $a0\n"
     else

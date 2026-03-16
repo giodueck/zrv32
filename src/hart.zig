@@ -244,8 +244,13 @@ pub const Hart = struct {
     }
 
     /// Debugging method to print the current Hart state to stderr
-    pub fn printState(self: @This()) void {
-        std.debug.print("pc: 0x{x:0>8}\n", .{self.pc});
+    pub fn printState(self: @This()) !void {
+        var buffer: [1024]u8 = undefined;
+        var stdout = std.fs.File.stdout().writer(&buffer);
+        const writer = &stdout.interface;
+
+        try writer.print("pc: 0x{x:0>8}\n", .{self.pc});
+        try writer.flush();
         const register_names = comptime a: {
             var names: [32][]const u8 = undefined;
             for (@typeInfo(@TypeOf(riscv.RegisterNames)).@"struct".fields, 0..) |f, i| {
@@ -261,22 +266,25 @@ pub const Hart = struct {
             break :a names;
         };
         for (0..16) |i| {
-            std.debug.print("{s: >4} ({s: >3}) 0x{x:08} | {s: >4} ({s: >3}) 0x{x:08}\n", .{ register_aliases[i * 2], register_names[i * 2], self.registers[i * 2], register_aliases[i * 2 + 1], register_names[i * 2 + 1], self.registers[i * 2 + 1] });
+            try writer.print("{s: >4} ({s: >3}) 0x{x:08} | {s: >4} ({s: >3}) 0x{x:08}\n", .{ register_aliases[i * 2], register_names[i * 2], self.registers[i * 2], register_aliases[i * 2 + 1], register_names[i * 2 + 1], self.registers[i * 2 + 1] });
+        try writer.flush();
         }
-        std.debug.print("\n(priv) = {d} {s}\n", .{ @intFromEnum(self.priv), @tagName(self.priv) });
+        try writer.print("\n(priv) = {d} {s}\n", .{ @intFromEnum(self.priv), @tagName(self.priv) });
         const mpp = @as(riscv.Priv, @enumFromInt(self.mstatus.mpp));
-        std.debug.print("mstatus = 0x{x:08} (MPP = {d} {s})\n", .{ @as(u32, @bitCast(self.mstatus)), @intFromEnum(mpp), @tagName(mpp) });
-        std.debug.print("mscratch = 0x{x:08}\n", .{self.mscratch});
-        std.debug.print("mtvec = 0x{x:08}\n", .{@as(u32, @bitCast(self.mtvec))});
-        std.debug.print("mepc = 0x{x:08} | mtval = 0x{x:08}\n", .{ self.mepc, self.mtval });
-        std.debug.print("mcause = 0x{x:08}", .{self.mcause});
-        if (self.mtval != 0) std.debug.print(" ({s})", .{@tagName(@as(riscv.ExceptionCause, @enumFromInt(self.mcause)))});
-        std.debug.print("\n", .{});
-        std.debug.print("cycle = 0x{x:016}\n", .{self.mcycle});
-        std.debug.print("instret = 0x{x:016}\n", .{self.minstret});
+        try writer.print("mstatus = 0x{x:08} (MPP = {d} {s})\n", .{ @as(u32, @bitCast(self.mstatus)), @intFromEnum(mpp), @tagName(mpp) });
+        try writer.print("mscratch = 0x{x:08}\n", .{self.mscratch});
+        try writer.print("mtvec = 0x{x:08}\n", .{@as(u32, @bitCast(self.mtvec))});
+        try writer.print("mepc = 0x{x:08} | mtval = 0x{x:08}\n", .{ self.mepc, self.mtval });
+        try writer.print("mcause = 0x{x:08}", .{self.mcause});
+        if (self.mtval != 0) try writer.print(" ({s})", .{@tagName(@as(riscv.ExceptionCause, @enumFromInt(self.mcause)))});
+        try writer.print("\n", .{});
+        try writer.print("cycle = 0x{x:016}\n", .{self.mcycle});
+        try writer.print("instret = 0x{x:016}\n", .{self.minstret});
+        try writer.flush();
         if (self.fatal_exception != null) {
-            std.debug.print("\nError: Fatal unhandled exception\n", .{});
+            try writer.print("\nError: Fatal unhandled exception\n", .{});
         }
+        try writer.flush();
     }
 
     /// Debugging method to print the current Hart state to an allocated string

@@ -39,7 +39,7 @@ To run a binary boot ROM program, run `./zig-out/bin/zrv32 boot.bin`.
 
 To also add a program ROM (a separate larger ROM from boot ROM), add another positional argument: `./zig-out/bin/zrv32 boot.bin program.bin`.
 
-The emulator will run until an EBREAK is run, at which point the CPU state is printed to stderr. For example, the program `add_sub.s`:
+The emulator will run until an `ebreak` is run in Machine mode, at which point the CPU state is printed to stderr. For example, the program `add_sub.s`:
 ```assembly
     addi x10, x0, 0x123
     addi x11, x0, 0x555

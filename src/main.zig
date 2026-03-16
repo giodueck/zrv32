@@ -228,7 +228,7 @@ pub fn main() !u8 {
             hart.step();
         }
 
-        hart.printState();
+        try hart.printState();
     } else {
         try tui.tuiMain(allocator, &hart);
     }
