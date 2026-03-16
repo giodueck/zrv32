@@ -121,6 +121,7 @@ pub const Hart = struct {
         self.mcause = 0;
         self.mtval = 0;
         self.fatal_exception = null;
+        self.ebreak = false;
     }
 
     // Testing methods
