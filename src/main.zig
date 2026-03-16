@@ -33,6 +33,11 @@ pub fn main() !u8 {
             .names = .{ .short = 't', .long = "test" },
         },
         .{
+            .id = 'a',
+            .names = .{ .long = "haltaddr" },
+            .takes_value = .one,
+        },
+        .{
             // positional: boot program
             .id = 'b',
             .takes_value = .one,
@@ -63,6 +68,8 @@ pub fn main() !u8 {
         "                   emulator until a breakpoint is hit in Machine mode.\n" ++
         "   -t  --test      Treat the boot binary executable as a test from the riscv-tests\n" ++
         "                   test suite. This loads the program at address 0x8000_0000 instead.\n" ++
+        "       --haltaddr  When -t is also specified, sets the address at which a store\n" ++
+        "                   will halt the emulator. Default value is 0x80001004 (tohost+4)\n" ++
         "\n";
 
     var iter = try std.process.ArgIterator.initWithAllocator(arena.allocator());
@@ -85,6 +92,7 @@ pub fn main() !u8 {
     var boot_filename: ?[]u8 = null;
     var program_fd: ?std.fs.File = null;
     var program_filename: ?[]u8 = null;
+    var haltaddr: u32 = 0x8000_1004;
 
     // We use the streaming parser, so we consume each argument individually
     while (cla_parser.next() catch |err| {
@@ -107,6 +115,9 @@ pub fn main() !u8 {
             },
             't' => {
                 do_test = true;
+            },
+            'a' => {
+                haltaddr = try std.fmt.parseInt(u32, arg.value.?, 0);
             },
             'b' => {
                 boot_fd = try std.fs.cwd().openFile(arg.value.?, .{ .mode = .read_only });
@@ -141,7 +152,10 @@ pub fn main() !u8 {
     defer {
         if (test_bus != null) allocator.destroy(test_bus.?);
     }
-    if (do_test) try test_bus.?.init(allocator);
+    if (do_test) {
+        try test_bus.?.init(allocator);
+        test_bus.?.halt_address = haltaddr;
+    }
     defer {
         if (test_bus != null) test_bus.?.deinit();
     }

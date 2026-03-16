@@ -13,9 +13,6 @@ pub const MmioStart: u32 = 0x0001_0000;
 // 64KB of memory mapped I/O
 pub const MmioSize: u32 = 0x1_0000;
 
-/// This address is used by riscv-tests tests to signal end of the test
-pub const HaltAddress: u32 = 0x8000_1004;
-
 const MemoryMap = .{
     .{
         .name = "Test RAM",
@@ -50,6 +47,9 @@ pub const TestBus = struct {
     allocator: std.mem.Allocator = undefined,
 
     start: u32 = TestRamStart,
+
+    /// This address is used by riscv-tests tests to signal end of the test
+    halt_address: u32 = 0x0,
 
     chardev: chardev.CharDev = undefined,
 
@@ -124,7 +124,7 @@ pub const TestBus = struct {
     pub fn store(self: *@This(), addr: u32, value: u32, width: u32) MemoryError!void {
         if (width > 4 or width == 3) return MemoryError.IllegalInstruction;
 
-        if (addr == HaltAddress) return MemoryError.HaltAddressWritten;
+        if (addr == self.halt_address) return MemoryError.HaltAddressWritten;
 
         // setb does not check access control, we need to do that here.
         // If a store for any address outside the allowed ranges is requested, return with a StoreAccessFault
