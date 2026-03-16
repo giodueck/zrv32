@@ -89,6 +89,8 @@ instret = 0x0000000000000009
 ```
 
 ### Creating programs
+***Note***: This depends on the `riscv32-unknown-elf-*` toolchain.
+
 Programs can be compiled with the `riscv32-unknown-elf-*` toolchain. The necessary commands to create the bare binary from assembly source are wrapped in the `assembleboot.sh` and `assembleprog.sh` scripts. The difference between them is only the base address used, but it is crucial for each type of binary (boot and program).
 
 This script then produces an ELF and a binary .bin file:
@@ -97,3 +99,12 @@ $ ./assembleboot.sh source.s out
 $ ls
 . .. <other files> assembleboot.sh source.s out out.o out.bin
 ```
+
+## Running Tests
+***Note***: This depends on the `riscv32-unknown-elf-*` toolchain.
+
+The tests this emulator is ran agaist are the [riscv-tests](https://github.com/riscv-software-src/riscv-tests), compiled with XLEN=32. Currently, the I and M instruction sets are tested for.
+
+To get help compiling and placing the tests in the local directory, run the `run-tests.sh` script for the first time.
+
+If the tests are compiled and in the right location, they should be run in sequence and report the result (PASS or FAIL with the reason).
