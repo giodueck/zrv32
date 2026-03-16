@@ -50,6 +50,9 @@
 ## Architecture
 
 - [x] Generic Bus interface (to have different possible environments, e.g. riscv-test with _start at 0x8000_0000)
+- [ ] Dynamically allocated memory, only allocated when written to.
+- [ ] Interrupts
+
 ## Input/Output
 
 - [x] Text output
