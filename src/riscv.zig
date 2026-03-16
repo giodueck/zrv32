@@ -117,6 +117,14 @@ pub const Funct3 = .{
         .sra   = 0b101,
         .@"or" = 0b110,
         .@"and"= 0b111,
+        .mul   = 0b000,
+        .mulh  = 0b001,
+        .mulsu = 0b010,
+        .mulhu = 0b011,
+        .div   = 0b100,
+        .divu  = 0b101,
+        .rem   = 0b110,
+        .remu  = 0b111,
     },
     .BRANCH = .{
         .beq  = 0b000,
@@ -150,6 +158,14 @@ pub const Funct3 = .{
     .MISC_MEM = .{
         .fence  = 0b000,
         .fencei = 0b001,
+    },
+};
+
+pub const Funct7 = .{
+    .OP = .{
+        .default = 0b0000000,
+        .muldiv  = 0b0000001,
+        .sub     = 0b0100000,
     },
 };
 

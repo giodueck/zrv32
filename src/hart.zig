@@ -735,6 +735,10 @@ pub const Hart = struct {
     fn executeOp(self: *@This()) void {
         const buf = &self.execute_buf;
         const decoded: riscv.RTypeInstruction = @bitCast(buf.instruction);
+        if (decoded.funct7 == riscv.Funct7.OP.muldiv) {
+            self.executeMulDiv();
+            return;
+        }
         switch (decoded.funct3) {
             riscv.Funct3.OP.add => {
                 buf.res = buf.op1;
@@ -781,6 +785,82 @@ pub const Hart = struct {
                 } else {
                     buf.exception = .IllegalInstruction;
                 }
+            },
+        }
+    }
+
+    fn executeMulDiv(self: *@This()) void {
+        const buf = &self.execute_buf;
+        const decoded: riscv.RTypeInstruction = @bitCast(buf.instruction);
+        switch (decoded.funct3) {
+            riscv.Funct3.OP.mul => {
+                buf.res = buf.op1 *% buf.op2;
+            },
+            riscv.Funct3.OP.mulh => {
+                const op1: i32 = @bitCast(buf.op1);
+                const op2: i32 = @bitCast(buf.op2);
+                const res: i32 = @truncate((@as(i64, op1) * @as(i64, op2)) >> 32);
+                buf.res = @bitCast(res);
+            },
+            riscv.Funct3.OP.mulsu => {
+                const op1: i32 = @bitCast(buf.op1);
+                const op1_sext: u64 = @bitCast(@as(i64, op1));
+                buf.res = @truncate((op1_sext * @as(u64, buf.op2)) >> 32);
+            },
+            riscv.Funct3.OP.mulhu => {
+                buf.res = @truncate((@as(u64, buf.op1) * @as(u64, buf.op2)) >> 32);
+            },
+            riscv.Funct3.OP.div => {
+                // Division by 0
+                if (buf.op2 == 0) {
+                    buf.res = 0xFFFF_FFFF; // -1
+                    return;
+                }
+                const op1: i32 = @bitCast(buf.op1);
+                const op2: i32 = @bitCast(buf.op2);
+                // Division overflow
+                if (op1 == std.math.minInt(i32) and op2 == -1) {
+                    buf.res = buf.op1;
+                    return;
+                }
+                const res: i32 = @divTrunc(op1, op2);
+                buf.res = @bitCast(res);
+            },
+            riscv.Funct3.OP.divu => {
+                // Division by 0
+                if (buf.op2 == 0) {
+                    buf.res = 0xFFFF_FFFF; // -1
+                    return;
+                }
+                const op1 = buf.op1;
+                const op2 = buf.op2;
+                buf.res = @divTrunc(op1, op2);
+            },
+            riscv.Funct3.OP.rem => {
+                // Division by 0
+                if (buf.op2 == 0) {
+                    buf.res = buf.op1;
+                    return;
+                }
+                const op1: i32 = @bitCast(buf.op1);
+                const op2: i32 = @bitCast(buf.op2);
+                // Division overflow
+                if (op1 == std.math.minInt(i32) and op2 == -1) {
+                    buf.res = 0;
+                    return;
+                }
+                const res: i32 = @rem(op1, op2);
+                buf.res = @bitCast(res);
+            },
+            riscv.Funct3.OP.remu => {
+                // Division by 0
+                if (buf.op2 == 0) {
+                    buf.res = buf.op1;
+                    return;
+                }
+                const op1 = buf.op1;
+                const op2 = buf.op2;
+                buf.res = @rem(op1, op2);
             },
         }
     }
@@ -1040,7 +1120,7 @@ pub const Hart = struct {
             },
             else => {
                 buf.exception = .IllegalInstruction;
-            }
+            },
         }
     }
 

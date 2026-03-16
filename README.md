@@ -10,7 +10,7 @@ in Factorio's Circuit Network.
 ## Goals
 - [x] RV32I: base integer (unprivileged) instruction set
 - [x] 5-Stage Instruction pipeline: fetch, decode, read registers, execute and memory access, writeback
-- [ ] M: integer multiplication and division
+- [x] M: integer multiplication and division
 
 Potential goals: Run Linux on the emulated CPU; add Factorio-specific extensions
 - [x] Exceptions, interrupts and traps
