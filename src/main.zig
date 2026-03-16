@@ -2,8 +2,8 @@ const std = @import("std");
 const clap = @import("clap");
 
 const Hart = @import("hart.zig").Hart;
-const standardBus = @import("bus.zig");
-const testBus = @import("testbus.zig");
+const standardBus = @import("standardBus.zig");
+const testBus = @import("testBus.zig");
 const riscv = @import("riscv.zig");
 
 const tui = @import("tui.zig");

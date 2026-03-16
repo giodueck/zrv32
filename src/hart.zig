@@ -2,7 +2,7 @@
 
 const std = @import("std");
 const Bus = @import("Bus.zig");
-const standardBus = @import("bus.zig");
+const standardBus = @import("standardBus.zig");
 const riscv = @import("riscv.zig");
 
 /// Keeps the result of the last Fetch operation
