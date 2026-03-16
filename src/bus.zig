@@ -118,7 +118,6 @@ pub const StandardBus = struct {
     boot_rom: []u8 = &.{},
     program_rom: []u8 = &.{},
     ram: []u8 = &.{},
-    test_ram: []u8 = &.{},
 
     allocator: std.mem.Allocator = undefined,
 
@@ -136,7 +135,6 @@ pub const StandardBus = struct {
     }
 
     pub fn deinit(self: *@This()) void {
-        self.allocator.free(self.test_ram);
         self.allocator.free(self.ram);
         self.allocator.free(self.program_rom);
         self.allocator.free(self.boot_rom);
