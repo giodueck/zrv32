@@ -49,9 +49,11 @@
 const std = @import("std");
 
 const Bus = @import("Bus.zig");
+const MmioDevice = @import("MmioDevice.zig");
 const MemoryError = Bus.MemoryError;
 const AccessControl = Bus.AccessControl;
-const chardev = @import("chardev.zig");
+const Width = Bus.Width;
+const CharDev = @import("CharDev.zig");
 
 pub const RamStart: u32 = 0x0004_0000;
 // 64KB of main memory
@@ -114,6 +116,10 @@ const Devices = enum(u32) {
     _,
 };
 
+const DeviceAddresses = .{
+    .CharDev = &[_]u32{0x1_0000},
+};
+
 pub const StandardBus = struct {
     boot_rom: []u8 = &.{},
     program_rom: []u8 = &.{},
@@ -123,18 +129,24 @@ pub const StandardBus = struct {
 
     start: u32 = BootRomStart,
 
-    chardev: chardev.CharDev = undefined,
+    chardev: CharDev = undefined,
+
+    devices: std.ArrayList(MmioDevice) = std.ArrayList(MmioDevice).empty,
 
     pub fn init(self: *@This(), allocator: std.mem.Allocator) !void {
         self.allocator = allocator;
         self.boot_rom = try self.allocator.alloc(u8, BootRomSize);
         self.program_rom = try self.allocator.alloc(u8, ProgramRomSize);
         self.ram = try self.allocator.alloc(u8, RamSize);
-        self.chardev.init(null);
         self.start = BootRomStart;
+
+        self.devices = std.ArrayList(MmioDevice).empty;
+        self.chardev.init(null, DeviceAddresses.CharDev);
+        try self.devices.append(self.allocator, self.chardev.interface());
     }
 
     pub fn deinit(self: *@This()) void {
+        self.devices.deinit(self.allocator);
         self.allocator.free(self.ram);
         self.allocator.free(self.program_rom);
         self.allocator.free(self.boot_rom);
@@ -145,7 +157,7 @@ pub const StandardBus = struct {
     }
 
     pub fn setCharDevWriter(self: *@This(), writer: *std.io.Writer) void {
-        self.chardev.init(writer);
+        self.chardev.init(writer, DeviceAddresses.CharDev);
     }
 
     /// Set a single byte.
@@ -169,19 +181,19 @@ pub const StandardBus = struct {
     ///
     /// For access from an instruction, use the store method instead.
     /// Writing to ROM is perfectly fine in this method, as it is not meant for emulator use.
-    pub fn set(self: *@This(), addr: u32, value: u32, width: u3) void {
+    pub fn set(self: *@This(), addr: u32, value: u32, width: Width) void {
         var bytes_buf: [4]u8 = .{ 0, 0, 0, 0 };
         var bytes: []u8 = undefined;
 
         switch (width) {
-            1 => {
+            .byte => {
                 bytes_buf[0] = @truncate(value);
             },
-            2 => {
+            .halfword => {
                 bytes_buf[0] = @truncate(value);
                 bytes_buf[1] = @truncate(value >> 8);
             },
-            4 => {
+            .word => {
                 bytes_buf[0] = @truncate(value);
                 bytes_buf[1] = @truncate(value >> 8);
                 bytes_buf[2] = @truncate(value >> 16);
@@ -192,7 +204,7 @@ pub const StandardBus = struct {
                 return;
             },
         }
-        bytes = bytes_buf[0..width];
+        bytes = bytes_buf[0..@intFromEnum(width)];
 
         for (bytes, 0..) |b, i| {
             self.setb(addr +% @as(u32, @intCast(i)), b);
@@ -201,9 +213,7 @@ pub const StandardBus = struct {
 
     /// Called by the CPU when setting a value at a memory address.
     /// Applies some restrictions to what memory ranges can be written to, and may fail depending on it.
-    pub fn store(self: *@This(), addr: u32, value: u32, width: u32) MemoryError!void {
-        if (width > 4 or width == 3) return MemoryError.IllegalInstruction;
-
+    pub fn store(self: *@This(), addr: u32, value: u32, width: Width) MemoryError!void {
         // setb does not check access control, we need to do that here.
         // If a store for any address outside the allowed ranges is requested, return with a StoreAccessFault
         inline for (@typeInfo(@TypeOf(MemoryMap)).@"struct".fields) |field| {
@@ -216,11 +226,11 @@ pub const StandardBus = struct {
                             return MemoryError.StoreAccessFault;
                         },
                         .CharDev => {
-                            self.chardev.store(addr, value, width);
+                            try self.chardev.store(addr, value, width);
                         },
                     }
                 } else {
-                    for (0..width) |i| {
+                    for (0..@intFromEnum(width)) |i| {
                         self.setb(addr +% @as(u32, @intCast(i)), @truncate(value >> @intCast(8 * i)));
                     }
                 }
@@ -247,18 +257,15 @@ pub const StandardBus = struct {
 
     /// Get the memory at the address with width bytes.
     /// The maximum width supported is 4, with the minimum being 1.
-    /// Illegal width will fail silently and return 0.
     /// Illegal access will fail silently and return 0 for the affected bytes, no traps are set using this
     /// method.
     /// The returned value is 32 bits wide, filled with 0s if the requested width was less than 4.
     ///
     /// For access from an instruction, use the load method instead.
     /// Reading from restricted memory is perfectly fine in this method, as it is not meant for emulator use.
-    pub fn get(self: *@This(), addr: u32, width: u3) u32 {
-        if (width > 4) return 0;
-
+    pub fn get(self: *@This(), addr: u32, width: Width) u32 {
         var value: u32 = 0;
-        for (0..width) |i| {
+        for (0..@intFromEnum(width)) |i| {
             value |= @as(u32, self.getb(addr +% @as(u32, @truncate(i)))) << (8 * @as(u5, @truncate(i)));
         }
 
@@ -267,9 +274,7 @@ pub const StandardBus = struct {
 
     /// Called by the CPU when getting a value at a memory address.
     /// Applies some restrictions to what memory ranges can be read from, and may fail depending on it.
-    pub fn load(self: *@This(), addr: u32, width: u32) MemoryError!u32 {
-        if (width > 4 or width == 3) return MemoryError.IllegalInstruction;
-
+    pub fn load(self: *@This(), addr: u32, width: Width) MemoryError!u32 {
         var ret: u32 = 0;
 
         // getb does not check access control, we need to do that here.
@@ -288,7 +293,7 @@ pub const StandardBus = struct {
                         },
                     }
                 } else {
-                    for (0..width) |i| {
+                    for (0..@intFromEnum(width)) |i| {
                         ret |= @as(u32, self.getb(addr +% @as(u32, @truncate(i)))) << (8 * @as(u5, @truncate(i)));
                     }
                 }
@@ -309,7 +314,7 @@ pub const StandardBus = struct {
             const range = @field(MemoryMap, field.name);
 
             if (addr >= range.start and addr < range.start + range.size and range.access.execute) {
-                return self.get(addr, 4);
+                return self.get(addr, .word);
             }
         }
 

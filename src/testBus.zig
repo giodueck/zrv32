@@ -3,7 +3,8 @@ const std = @import("std");
 const Bus = @import("Bus.zig");
 const MemoryError = Bus.MemoryError;
 const AccessControl = Bus.AccessControl;
-const chardev = @import("chardev.zig");
+const Width = Bus.Width;
+const CharDev = @import("CharDev.zig");
 
 pub const TestRamStart: u32 = 0x8000_0000;
 // 1MB of memory for running tests
@@ -41,6 +42,10 @@ const Devices = enum(u32) {
     _,
 };
 
+const DeviceAddresses = .{
+    .CharDev = &[_]u32{0x1_0000},
+};
+
 pub const TestBus = struct {
     ram: []u8 = &.{},
 
@@ -51,12 +56,12 @@ pub const TestBus = struct {
     /// This address is used by riscv-tests tests to signal end of the test
     halt_address: u32 = 0x0,
 
-    chardev: chardev.CharDev = undefined,
+    chardev: CharDev = undefined,
 
     pub fn init(self: *@This(), allocator: std.mem.Allocator) !void {
         self.allocator = allocator;
         self.ram = try self.allocator.alloc(u8, TestRamSize);
-        self.chardev.init(null);
+        self.chardev.init(null, DeviceAddresses.CharDev);
         self.start = TestRamStart;
     }
 
@@ -69,7 +74,7 @@ pub const TestBus = struct {
     }
 
     pub fn setCharDevWriter(self: *@This(), writer: *std.io.Writer) void {
-        self.chardev.init(writer);
+        self.chardev.init(writer, DeviceAddresses.CharDev);
     }
 
     /// Set a single byte.
@@ -89,19 +94,19 @@ pub const TestBus = struct {
     ///
     /// For access from an instruction, use the store method instead.
     /// Writing to ROM is perfectly fine in this method, as it is not meant for emulator use.
-    pub fn set(self: *@This(), addr: u32, value: u32, width: u3) void {
+    pub fn set(self: *@This(), addr: u32, value: u32, width: Width) void {
         var bytes_buf: [4]u8 = .{ 0, 0, 0, 0 };
         var bytes: []u8 = undefined;
 
         switch (width) {
-            1 => {
+            .byte => {
                 bytes_buf[0] = @truncate(value);
             },
-            2 => {
+            .halfword => {
                 bytes_buf[0] = @truncate(value);
                 bytes_buf[1] = @truncate(value >> 8);
             },
-            4 => {
+            .word => {
                 bytes_buf[0] = @truncate(value);
                 bytes_buf[1] = @truncate(value >> 8);
                 bytes_buf[2] = @truncate(value >> 16);
@@ -112,7 +117,7 @@ pub const TestBus = struct {
                 return;
             },
         }
-        bytes = bytes_buf[0..width];
+        bytes = bytes_buf[0..@intFromEnum(width)];
 
         for (bytes, 0..) |b, i| {
             self.setb(addr +% @as(u32, @intCast(i)), b);
@@ -121,9 +126,7 @@ pub const TestBus = struct {
 
     /// Called by the CPU when setting a value at a memory address.
     /// Applies some restrictions to what memory ranges can be written to, and may fail depending on it.
-    pub fn store(self: *@This(), addr: u32, value: u32, width: u32) MemoryError!void {
-        if (width > 4 or width == 3) return MemoryError.IllegalInstruction;
-
+    pub fn store(self: *@This(), addr: u32, value: u32, width: Width) MemoryError!void {
         if (addr == self.halt_address) return MemoryError.HaltAddressWritten;
 
         // setb does not check access control, we need to do that here.
@@ -138,11 +141,11 @@ pub const TestBus = struct {
                             return MemoryError.StoreAccessFault;
                         },
                         .CharDev => {
-                            self.chardev.store(addr, value, width);
+                            try self.chardev.store(addr, value, width);
                         },
                     }
                 } else {
-                    for (0..width) |i| {
+                    for (0..@intFromEnum(width)) |i| {
                         self.setb(addr +% @as(u32, @intCast(i)), @truncate(value >> @intCast(8 * i)));
                     }
                 }
@@ -172,11 +175,9 @@ pub const TestBus = struct {
     ///
     /// For access from an instruction, use the load method instead.
     /// Reading from restricted memory is perfectly fine in this method, as it is not meant for emulator use.
-    pub fn get(self: *@This(), addr: u32, width: u3) u32 {
-        if (width > 4) return 0;
-
+    pub fn get(self: *@This(), addr: u32, width: Width) u32 {
         var value: u32 = 0;
-        for (0..width) |i| {
+        for (0..@intFromEnum(width)) |i| {
             value |= @as(u32, self.getb(addr +% @as(u32, @truncate(i)))) << (8 * @as(u5, @truncate(i)));
         }
 
@@ -185,9 +186,8 @@ pub const TestBus = struct {
 
     /// Called by the CPU when getting a value at a memory address.
     /// Applies some restrictions to what memory ranges can be read from, and may fail depending on it.
-    pub fn load(self: *@This(), addr: u32, width: u32) MemoryError!u32 {
-        if (width > 4 or width == 3) return MemoryError.IllegalInstruction;
-
+    /// width is the width in bytes, being at most 4.
+    pub fn load(self: *@This(), addr: u32, width: Width) MemoryError!u32 {
         var ret: u32 = 0;
 
         // getb does not check access control, we need to do that here.
@@ -206,7 +206,7 @@ pub const TestBus = struct {
                         },
                     }
                 } else {
-                    for (0..width) |i| {
+                    for (0..@intFromEnum(width)) |i| {
                         ret |= @as(u32, self.getb(addr +% @as(u32, @truncate(i)))) << (8 * @as(u5, @truncate(i)));
                     }
                 }
@@ -227,7 +227,7 @@ pub const TestBus = struct {
             const range = @field(MemoryMap, field.name);
 
             if (addr >= range.start and addr < range.start + range.size and range.access.execute) {
-                return self.get(addr, 4);
+                return self.get(addr, .word);
             }
         }
 

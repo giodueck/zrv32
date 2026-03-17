@@ -51,6 +51,7 @@
 
 - [x] Generic Bus interface (to have different possible environments, e.g. riscv-test with _start at 0x8000_0000)
 - [ ] Dynamically allocated memory, only allocated when written to.
+- [ ] Actual memory mapped timer accessible via `mtime` address and `time` CSRs
 - [ ] Interrupts
 
 ## Input/Output

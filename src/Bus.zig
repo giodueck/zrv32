@@ -1,4 +1,5 @@
 const std = @import("std");
+const riscv = @import("riscv.zig");
 
 const Bus = @This();
 
@@ -6,12 +7,14 @@ pub const MemoryError = error{
     IllegalInstruction,
     InstructionAccessFault,
     InstructionAddressMisaligned,
+    LoadAddressMisaligned,
     LoadAccessFault,
+    StoreAddressMisaligned,
     StoreAccessFault,
     HaltAddressWritten,
-    // Load/StoreAccessMisaligned could potentially also be here, but we can support those easily
 };
 
+/// This can be used by implementations to mark ranges as having certain restrictions
 pub const AccessControl = struct {
     read: bool = false,
     write: bool = false,
@@ -19,12 +22,14 @@ pub const AccessControl = struct {
     io: bool = false,
 };
 
+pub const Width = enum(u3) { byte = 1, halfword = 2, word = 4, _ };
+
 impl: *anyopaque,
 /// PC reset address
-_set: *const fn (*anyopaque, u32, u32, u3) void,
-_get: *const fn (*anyopaque, u32, u3) u32,
-_store: *const fn (*anyopaque, u32, u32, u32) MemoryError!void,
-_load: *const fn (*anyopaque, u32, u32) MemoryError!u32,
+_set: *const fn (*anyopaque, u32, u32, Width) void,
+_get: *const fn (*anyopaque, u32, Width) u32,
+_store: *const fn (*anyopaque, u32, u32, Width) MemoryError!void,
+_load: *const fn (*anyopaque, u32, Width) MemoryError!u32,
 _fetch: *const fn (*anyopaque, u32) MemoryError!u32,
 _setCharDevWriter: *const fn (*anyopaque, *std.io.Writer) void,
 _getStart: *const fn (*anyopaque) u32,
@@ -35,13 +40,13 @@ _getStart: *const fn (*anyopaque) u32,
 ///
 /// For access from an instruction, use the store method instead.
 /// Writing to ROM is perfectly fine in this method, as it is not meant for emulator use.
-pub fn set(self: Bus, addr: u32, value: u32, width: u3) void {
+pub fn set(self: Bus, addr: u32, value: u32, width: Width) void {
     self._set(self.impl, addr, value, width);
 }
 
 /// Called by the CPU when setting a value at a memory address.
 /// Applies some restrictions to what memory ranges can be written to, and may fail depending on it.
-pub fn store(self: Bus, addr: u32, value: u32, width: u32) MemoryError!void {
+pub fn store(self: Bus, addr: u32, value: u32, width: Width) MemoryError!void {
     try self._store(self.impl, addr, value, width);
 }
 
@@ -54,13 +59,14 @@ pub fn store(self: Bus, addr: u32, value: u32, width: u32) MemoryError!void {
 ///
 /// For access from an instruction, use the load method instead.
 /// Reading from restricted memory is perfectly fine in this method, as it is not meant for emulator use.
-pub fn get(self: Bus, addr: u32, width: u3) u32 {
+pub fn get(self: Bus, addr: u32, width: Width) u32 {
     return self._get(self.impl, addr, width);
 }
 
 /// Called by the CPU when getting a value at a memory address.
 /// Applies some restrictions to what memory ranges can be read from, and may fail depending on it.
-pub fn load(self: Bus, addr: u32, width: u32) MemoryError!u32 {
+/// width is the width in bytes, being at most 4.
+pub fn load(self: Bus, addr: u32, width: Width) MemoryError!u32 {
     return self._load(self.impl, addr, width);
 }
 
@@ -97,16 +103,16 @@ pub fn implBy(impl_obj: anytype) Bus {
 inline fn BusDelegate(impl_obj: anytype) type {
     const ImplType = @TypeOf(impl_obj);
     return struct {
-        pub fn set(impl: *anyopaque, addr: u32, value: u32, width: u3) void {
+        pub fn set(impl: *anyopaque, addr: u32, value: u32, width: Width) void {
             TPtr(ImplType, impl).set(addr, value, width);
         }
-        pub fn store(impl: *anyopaque, addr: u32, value: u32, width: u32) MemoryError!void {
+        pub fn store(impl: *anyopaque, addr: u32, value: u32, width: Width) MemoryError!void {
             try TPtr(ImplType, impl).store(addr, value, width);
         }
-        pub fn get(impl: *anyopaque, addr: u32, width: u3) u32 {
+        pub fn get(impl: *anyopaque, addr: u32, width: Width) u32 {
             return TPtr(ImplType, impl).get(addr, width);
         }
-        pub fn load(impl: *anyopaque, addr: u32, width: u32) MemoryError!u32 {
+        pub fn load(impl: *anyopaque, addr: u32, width: Width) MemoryError!u32 {
             return TPtr(ImplType, impl).load(addr, width);
         }
         pub fn fetch(impl: *anyopaque, addr: u32) MemoryError!u32 {
@@ -123,4 +129,26 @@ inline fn BusDelegate(impl_obj: anytype) type {
 
 fn TPtr(T: type, opaque_ptr: *anyopaque) T {
     return @as(T, @ptrCast(@alignCast(opaque_ptr)));
+}
+
+pub fn isMisaligned(addr: u32, width: Width) bool {
+    return switch (width) {
+        .byte => false,
+        .halfword => addr & 1 != 0,
+        .word => addr & 3 != 0,
+        else => true,
+    };
+}
+
+pub fn ExceptionFromMemoryError(e: MemoryError) riscv.ExceptionCause {
+    return switch (e) {
+        MemoryError.IllegalInstruction => .IllegalInstruction,
+        MemoryError.InstructionAccessFault => .InstructionAccessFault,
+        MemoryError.InstructionAddressMisaligned => .InstructionAddressMisaligned,
+        MemoryError.LoadAddressMisaligned => .LoadAddressMisaligned,
+        MemoryError.LoadAccessFault => .LoadAccessFault,
+        MemoryError.StoreAddressMisaligned => .StoreAddressMisaligned,
+        MemoryError.StoreAccessFault => .StoreAccessFault,
+        MemoryError.HaltAddressWritten => .HaltAddressWritten,
+    };
 }
