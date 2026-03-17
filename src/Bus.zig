@@ -12,6 +12,8 @@ pub const MemoryError = error{
     StoreAddressMisaligned,
     StoreAccessFault,
     HaltAddressWritten,
+    /// Emitted when the emulator fails allocating memory
+    HardwareError,
 };
 
 /// This can be used by implementations to mark ranges as having certain restrictions
@@ -26,7 +28,7 @@ pub const Width = enum(u3) { byte = 1, halfword = 2, word = 4, _ };
 
 impl: *anyopaque,
 /// PC reset address
-_set: *const fn (*anyopaque, u32, u32, Width) void,
+_set: *const fn (*anyopaque, u32, u32, Width) MemoryError!void,
 _get: *const fn (*anyopaque, u32, Width) u32,
 _store: *const fn (*anyopaque, u32, u32, Width) MemoryError!void,
 _load: *const fn (*anyopaque, u32, Width) MemoryError!u32,
@@ -38,12 +40,13 @@ _getTimeAddrs: *const fn (*anyopaque) ?[4]u32,
 
 /// Set the memory at the address to the value, truncated to width bytes.
 /// The maximum width supported is 4, with the minimum being 1.
-/// Illegal access or illegal width will fail silently, no traps are set using this method.
+/// Illegal access or illegal width will fail silently.
+/// If allocation fails, returns a MemoryError.HardwareError, which should halt the emulator
 ///
 /// For access from an instruction, use the store method instead.
 /// Writing to ROM is perfectly fine in this method, as it is not meant for emulator use.
-pub fn set(self: Bus, addr: u32, value: u32, width: Width) void {
-    self._set(self.impl, addr, value, width);
+pub fn set(self: Bus, addr: u32, value: u32, width: Width) MemoryError!void {
+    try self._set(self.impl, addr, value, width);
 }
 
 /// Called by the CPU when setting a value at a memory address.
@@ -116,8 +119,8 @@ pub fn implBy(impl_obj: anytype) Bus {
 inline fn BusDelegate(impl_obj: anytype) type {
     const ImplType = @TypeOf(impl_obj);
     return struct {
-        pub fn set(impl: *anyopaque, addr: u32, value: u32, width: Width) void {
-            TPtr(ImplType, impl).set(addr, value, width);
+        pub fn set(impl: *anyopaque, addr: u32, value: u32, width: Width) MemoryError!void {
+            try TPtr(ImplType, impl).set(addr, value, width);
         }
         pub fn store(impl: *anyopaque, addr: u32, value: u32, width: Width) MemoryError!void {
             try TPtr(ImplType, impl).store(addr, value, width);
@@ -169,5 +172,6 @@ pub fn ExceptionFromMemoryError(e: MemoryError) riscv.ExceptionCause {
         MemoryError.StoreAddressMisaligned => .StoreAddressMisaligned,
         MemoryError.StoreAccessFault => .StoreAccessFault,
         MemoryError.HaltAddressWritten => .HaltAddressWritten,
+        MemoryError.HardwareError => .HardwareError,
     };
 }

@@ -232,14 +232,20 @@ pub const Hart = struct {
     /// Loads a slice of u32 into memory starting at the address given. Fails silently.
     pub fn loadProgram(self: *@This(), address: u32, rom: []const u32) void {
         for (rom, 0..) |word, off| {
-            self.bus.set(address +% @as(u32, @intCast(off * 4)), word, .word);
+            self.bus.set(address +% @as(u32, @intCast(off * 4)), word, .word) catch |e| {
+                self.fatal_exception = Bus.ExceptionFromMemoryError(e);
+                return;
+            };
         }
     }
 
     /// Loads a slice of bytes into memory starting at the address given. Fails silently.
     pub fn loadProgramBytes(self: *@This(), address: u32, rom: []const u8) void {
         for (rom, 0..) |byte, off| {
-            self.bus.set(address +% @as(u32, @intCast(off)), byte, .byte);
+            self.bus.set(address +% @as(u32, @intCast(off)), byte, .byte) catch |e| {
+                self.fatal_exception = Bus.ExceptionFromMemoryError(e);
+                return;
+            };
         }
     }
 
@@ -552,7 +558,9 @@ pub const Hart = struct {
         self.setPc(@as(u32, @bitCast(self.mtvec)) & 0xFFFF_FFFC);
 
         // Custom halting condition on store to a specific address
-        if (buf.exception.? == .HaltAddressWritten) {
+        if (buf.exception.? == .HaltAddressWritten or
+        // Memory allocation or other emulator error
+            buf.exception.? == .HardwareError) {
             self.fatal_exception = buf.exception.?;
             return;
         }

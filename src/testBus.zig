@@ -6,8 +6,8 @@ const AccessControl = Bus.AccessControl;
 const Width = Bus.Width;
 
 pub const TestRamStart: u32 = 0x8000_0000;
-// 1MB of memory for running tests
-pub const TestRamSize: u32 = 0x10_0000;
+// 256MB of memory for running tests
+pub const TestRamSize: u32 = 0x1000_0000;
 
 const MemoryMap = .{
     .{
@@ -23,7 +23,8 @@ const MemoryMap = .{
 };
 
 pub const TestBus = struct {
-    ram: []u8 = &.{},
+    /// Hash map of 4K blocks of memory, allocated only when needed
+    ram: std.AutoArrayHashMap(u32, []u8) = undefined,
 
     allocator: std.mem.Allocator = undefined,
 
@@ -34,12 +35,15 @@ pub const TestBus = struct {
 
     pub fn init(self: *@This(), allocator: std.mem.Allocator) !void {
         self.allocator = allocator;
-        self.ram = try self.allocator.alloc(u8, TestRamSize);
+        self.ram = std.AutoArrayHashMap(u32, []u8).init(allocator);
         self.start = TestRamStart;
     }
 
     pub fn deinit(self: *@This()) void {
-        self.allocator.free(self.ram);
+        for (self.ram.values()) |block| {
+            self.allocator.free(block);
+        }
+        self.ram.deinit();
     }
 
     pub fn interface(self: *@This()) Bus {
@@ -60,12 +64,32 @@ pub const TestBus = struct {
         return null;
     }
 
+    /// Set a byte in RAM. If the 4K block the address falls into is already allocated, simply sets the
+    /// byte at the requested address. If not, the block is first allocated.
+    /// If allocation fails, returns a MemoryError.HardwareError, which should halt the emulator
+    fn setbRam(self: *@This(), addr: u32, byte: u8) MemoryError!void {
+        const address = addr - TestRamStart;
+        if (self.ram.get(address >> 12)) |block| {
+            block[address & ((1 << 12) - 1)] = byte;
+        } else {
+            var block = self.allocator.alloc(u8, 1 << 12) catch {
+                return MemoryError.HardwareError;
+            };
+            block[address & ((1 << 12) - 1)] = byte;
+            self.ram.put(address >> 12, block) catch {
+                self.allocator.free(block);
+                return MemoryError.HardwareError;
+            };
+        }
+    }
+
     /// Set a single byte.
     /// Illegal access will fail silently.
     /// Does not check access control.
-    fn setb(self: *@This(), addr: u32, byte: u8) void {
+    /// If allocation fails, returns a MemoryError.HardwareError, which should halt the emulator
+    fn setb(self: *@This(), addr: u32, byte: u8) MemoryError!void {
         if (addr >= TestRamStart and addr < TestRamStart + TestRamSize) {
-            self.ram[addr - TestRamStart] = byte;
+            try self.setbRam(addr, byte);
         }
         // else invalid address
         return;
@@ -73,11 +97,12 @@ pub const TestBus = struct {
 
     /// Set the memory at the address to the value, truncated to width bytes.
     /// The maximum width supported is 4, with the minimum being 1.
-    /// Illegal access or illegal width will fail silently, no traps are set using this method.
+    /// Illegal access or illegal width will fail silently.
+    /// If allocation fails, returns a MemoryError.HardwareError, which should halt the emulator
     ///
     /// For access from an instruction, use the store method instead.
     /// Writing to ROM is perfectly fine in this method, as it is not meant for emulator use.
-    pub fn set(self: *@This(), addr: u32, value: u32, width: Width) void {
+    pub fn set(self: *@This(), addr: u32, value: u32, width: Width) MemoryError!void {
         var bytes_buf: [4]u8 = .{ 0, 0, 0, 0 };
         var bytes: []u8 = undefined;
 
@@ -103,7 +128,7 @@ pub const TestBus = struct {
         bytes = bytes_buf[0..@intFromEnum(width)];
 
         for (bytes, 0..) |b, i| {
-            self.setb(addr +% @as(u32, @intCast(i)), b);
+            try self.setb(addr +% @as(u32, @intCast(i)), b);
         }
     }
 
@@ -119,7 +144,7 @@ pub const TestBus = struct {
 
             if (addr >= range.start and addr < range.start + range.size and range.access.write) {
                 for (0..@intFromEnum(width)) |i| {
-                    self.setb(addr +% @as(u32, @intCast(i)), @truncate(value >> @intCast(8 * i)));
+                    try self.setb(addr +% @as(u32, @intCast(i)), @truncate(value >> @intCast(8 * i)));
                 }
                 return;
             }
@@ -127,12 +152,23 @@ pub const TestBus = struct {
         return MemoryError.StoreAccessFault;
     }
 
+    /// Get a byte from RAM. If the 4K block the address falls into is already allocated, returns the byte at
+    /// that address. If not, returns the normal Zig undefined value: 0xAA.
+    fn getbRam(self: *@This(), addr: u32) u8 {
+        const address = addr - TestRamStart;
+        if (self.ram.get(address >> 12)) |block| {
+            return block[address & ((1 << 12) - 1)];
+        } else {
+            return 0xAA;
+        }
+    }
+
     /// Get a single byte.
     /// Illegal access will fail silently and return 0.
     /// Does not check access control.
     fn getb(self: *@This(), addr: u32) u8 {
         if (addr >= TestRamStart and addr < TestRamStart + TestRamSize) {
-            return self.ram[addr - TestRamStart];
+            return self.getbRam(addr);
         }
         // else invalid address
         return 0;

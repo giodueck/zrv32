@@ -200,17 +200,17 @@ pub fn main() !u8 {
     }
 
     if (program_fd) |fd| {
-        const buf = try allocator.alloc(u8, standardBus.ProgramRomSize);
+        const buf = try allocator.alloc(u8, standardBus.RamSize);
         defer allocator.free(buf);
         var reader = fd.reader(buf);
-        if (try reader.getSize() > standardBus.ProgramRomSize) {
-            try stderr.print("Program binary \"{s}\" too large: {d} out of a maximum of {d}\n", .{ program_filename.?, try reader.getSize(), standardBus.ProgramRomSize });
+        if (try reader.getSize() > standardBus.RamSize) {
+            try stderr.print("Program binary \"{s}\" too large: {d} out of a maximum of {d}\n", .{ program_filename.?, try reader.getSize(), standardBus.RamSize });
             return 1;
         }
         reader.interface.readSliceAll(buf) catch |e| {
             if (e != error.EndOfStream) return e;
         };
-        hart.loadProgramBytes(standardBus.ProgramRomStart, buf);
+        hart.loadProgramBytes(standardBus.RamStart, buf);
 
         allocator.free(program_filename.?);
         program_filename = null;

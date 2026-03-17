@@ -1,13 +1,15 @@
-.equ mtime, 0x10010
+.equ mtime, 0x100
+.equ chardev, 0x200
+.equ initialsp, 0xC0000000
 
     # Reset time to be equal to cycle, just to show the capability off
     la t0, mtime
-    li t1, 7
+    li t1, 6
     sw t1, 0(t0)
 
     # Set sp to end of RAM section. It will grow downwards
-    lui sp, %hi(0x00050000)
-    addi sp, sp, %lo(0x00050000)
+    lui sp, %hi(initialsp)
+    addi sp, sp, %lo(initialsp)
 
     # Reserve 256 bytes for OS stack
     # User stack starts 256 bytes lower
@@ -159,7 +161,7 @@ kputs:
     # void kputchar(char);
     # Print byte by accessing MMIO directly
 kputchar:
-    lui t1, %hi(0x00010000)
+    la t1, chardev
     sw a0, (t1)
     ret
 

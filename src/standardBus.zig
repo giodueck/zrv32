@@ -7,30 +7,14 @@
 // Memory map
 //
 //              |---------------------------|   Access (Read/Write/Execute = rwx)
-// 0x8001 FFFF  | Test memory (128KB)       |   rwx
-// 0x8000 0000  |                           |
+// 0xBFFF FFFF  | Dynamic RAM (1GB)         |   rwx
+// 0x8000 0000  | Program RAM               |
 //              |---------------------------|
-//              | Unused                    |   ---
+// 0x1000 1FFF  | Boot ROM (4KB)            |   r-x
+// 0x1000 0000  |                           |
 //              |---------------------------|
-// 0x0004 FFFF  | Dynamic RAM (64KB)        |   rw-
-// 0x0004 0000  |                           |
-//              |---------------------------|
-//              | Unused                    |   ---
-//              |---------------------------|
-// 0x0001 FFFF  | Mapped I/O (64KB)         |   rw-
-// 0x0001 0000  |                           |
-//              |---------------------------|
-//              | Unused                    |   ---
-//              |---------------------------|
-// 0x0000 7FFF  | Program ROM (24KB)        |   r-x
-// 0x0000 1000  |                           |
-//              |---------------------------|
-// 0x0000 1FFF  | Boot ROM    (4KB)         |   r-x
-// 0x0000 1000  | Boot address: 0x0000 1000 |
+// 0x0FFF FFFF  | Memory-mapped I/O (256MB) |   rw-
 // 0x0000 0000  |---------------------------|
-//
-// This is a Harvard architecture, meaning that program and data memory is separate. Thus, executable memory
-// is not readable or writable, and readable or writable memory is not executable.
 //
 // This memory map is left with some gaps, leaving space to expand regions without needing to split them up.
 // The emulator should be built so that changing these sizes is simple and easy, and the eventual Factorio
@@ -39,8 +23,7 @@
 // I/O devices
 // Timers: registers that count the number ticks passing in real time (60 ticks per second). They could also count
 //          in discrete intervals amounting to the number of ticks per clock cycle.
-//      - A system timer, reset only when the entire system is reset.
-//      - A user timer, reset when the user writes to it.
+//      - A system timer, known as CLInt or mtime
 //
 // Graphics? A framebuffer that may be manipulated by the CPU
 // A coprocessor? A discrete graphics/picture processor which does more complex operations on the framebuffer like
@@ -56,19 +39,15 @@ const Width = Bus.Width;
 const CharDev = @import("CharDev.zig");
 const CLInt = @import("CLInt.zig");
 
-pub const RamStart: u32 = 0x0004_0000;
-// 64KB of main memory
-pub const RamSize: u32 = 0x1_0000;
+pub const RamStart: u32 = 0x8000_0000;
+// 1GB of main memory
+pub const RamSize: u32 = 0x4000_0000;
 
-pub const MmioStart: u32 = 0x0001_0000;
-// 64KB of memory mapped I/O
-pub const MmioSize: u32 = 0x1_0000;
+pub const MmioStart: u32 = 0x0000_0000;
+// 256MB of memory mapped I/O
+pub const MmioSize: u32 = 0x1000_0000;
 
-pub const ProgramRomStart: u32 = 0x0000_2000;
-// 24KB of program ROM
-pub const ProgramRomSize: u32 = 0x6000;
-
-pub const BootRomStart: u32 = 0x0000_1000;
+pub const BootRomStart: u32 = 0x1000_0000;
 // 4KB of boot ROM
 pub const BootRomSize: u32 = 0x1000;
 
@@ -81,15 +60,6 @@ const MemoryMap = .{
         },
         .start = BootRomStart,
         .size = BootRomSize,
-    },
-    .{
-        .name = "Program ROM",
-        .access = AccessControl{
-            .execute = true,
-            .read = true,
-        },
-        .start = ProgramRomStart,
-        .size = ProgramRomSize,
     },
     .{
         .name = "Memory mapped I/O",
@@ -113,14 +83,14 @@ const MemoryMap = .{
 };
 
 const DeviceAddresses = .{
-    .chardev = &[_]u32{0x10000},
-    .clint = &[_]u32{ 0x10010, 0x10014, 0x10018, 0x1001c },
+    .clint = &[_]u32{ 0x100, 0x104, 0x108, 0x10c },
+    .chardev = &[_]u32{0x200},
 };
 
 pub const StandardBus = struct {
     boot_rom: []u8 = &.{},
-    program_rom: []u8 = &.{},
-    ram: []u8 = &.{},
+    /// Hash map of 4K blocks of memory, allocated only when needed
+    ram: std.AutoArrayHashMap(u32, []u8) = undefined,
 
     allocator: std.mem.Allocator = undefined,
 
@@ -134,8 +104,7 @@ pub const StandardBus = struct {
     pub fn init(self: *@This(), allocator: std.mem.Allocator) !void {
         self.allocator = allocator;
         self.boot_rom = try self.allocator.alloc(u8, BootRomSize);
-        self.program_rom = try self.allocator.alloc(u8, ProgramRomSize);
-        self.ram = try self.allocator.alloc(u8, RamSize);
+        self.ram = std.AutoArrayHashMap(u32, []u8).init(allocator);
         self.start = BootRomStart;
 
         self.devices = std.ArrayList(MmioDevice).empty;
@@ -147,8 +116,10 @@ pub const StandardBus = struct {
 
     pub fn deinit(self: *@This()) void {
         self.devices.deinit(self.allocator);
-        self.allocator.free(self.ram);
-        self.allocator.free(self.program_rom);
+        for (self.ram.values()) |block| {
+            self.allocator.free(block);
+        }
+        self.ram.deinit();
         self.allocator.free(self.boot_rom);
     }
 
@@ -170,14 +141,32 @@ pub const StandardBus = struct {
         return self.clint.addresses;
     }
 
+    /// Set a byte in RAM. If the 4K block the address falls into is already allocated, simply sets the
+    /// byte at the requested address. If not, the block is first allocated.
+    /// If allocation fails, returns a MemoryError.HardwareError, which should halt the emulator
+    fn setbRam(self: *@This(), addr: u32, byte: u8) MemoryError!void {
+        const address = addr - RamStart;
+        if (self.ram.get(address >> 12)) |block| {
+            block[address & ((1 << 12) - 1)] = byte;
+        } else {
+            var block = self.allocator.alloc(u8, 1 << 12) catch {
+                return MemoryError.HardwareError;
+            };
+            block[address & ((1 << 12) - 1)] = byte;
+            self.ram.put(address >> 12, block) catch {
+                self.allocator.free(block);
+                return MemoryError.HardwareError;
+            };
+        }
+    }
+
     /// Set a single byte.
     /// Illegal access will fail silently.
     /// Does not check access control.
-    fn setb(self: *@This(), addr: u32, byte: u8) void {
+    /// If allocation fails, returns a MemoryError.HardwareError, which should halt the emulator
+    fn setb(self: *@This(), addr: u32, byte: u8) MemoryError!void {
         if (addr >= RamStart and addr < RamStart + RamSize) {
-            self.ram[addr - RamStart] = byte;
-        } else if (addr >= ProgramRomStart and addr < ProgramRomStart + ProgramRomSize) {
-            self.program_rom[addr - ProgramRomStart] = byte;
+            try self.setbRam(addr, byte);
         } else if (addr >= BootRomStart and addr < BootRomStart + BootRomSize) {
             self.boot_rom[addr - BootRomStart] = byte;
         }
@@ -187,15 +176,16 @@ pub const StandardBus = struct {
 
     /// Set the memory at the address to the value, truncated to width bytes.
     /// The maximum width supported is 4, with the minimum being 1.
-    /// Illegal access or illegal width will fail silently, no traps are set using this method.
+    /// Illegal access or illegal width will fail silently.
+    /// If allocation fails, returns a MemoryError.HardwareError, which should halt the emulator
     ///
     /// For access from an instruction, use the store method instead.
     /// Writing to ROM is perfectly fine in this method, as it is not meant for emulator use.
-    pub fn set(self: *@This(), addr: u32, value: u32, width: Width) void {
+    pub fn set(self: *@This(), addr: u32, value: u32, width: Width) MemoryError!void {
         var bytes_buf: [4]u8 = .{ 0, 0, 0, 0 };
         var bytes: []u8 = undefined;
 
-        if (addr >= MmioStart and addr < MmioSize) {
+        if (addr >= MmioStart and addr < MmioStart + MmioSize) {
             self.store(addr, value, width) catch {};
             return;
         }
@@ -222,7 +212,7 @@ pub const StandardBus = struct {
         bytes = bytes_buf[0..@intFromEnum(width)];
 
         for (bytes, 0..) |b, i| {
-            self.setb(addr +% @as(u32, @intCast(i)), b);
+            try self.setb(addr +% @as(u32, @intCast(i)), b);
         }
     }
 
@@ -244,7 +234,7 @@ pub const StandardBus = struct {
                     }
                 } else {
                     for (0..@intFromEnum(width)) |i| {
-                        self.setb(addr +% @as(u32, @intCast(i)), @truncate(value >> @intCast(8 * i)));
+                        try self.setb(addr +% @as(u32, @intCast(i)), @truncate(value >> @intCast(8 * i)));
                     }
                 }
                 return;
@@ -253,14 +243,23 @@ pub const StandardBus = struct {
         return MemoryError.StoreAccessFault;
     }
 
+    /// Get a byte from RAM. If the 4K block the address falls into is already allocated, returns the byte at
+    /// that address. If not, returns the normal Zig undefined value: 0xAA.
+    fn getbRam(self: *@This(), addr: u32) u8 {
+        const address = addr - RamStart;
+        if (self.ram.get(address >> 12)) |block| {
+            return block[address & ((1 << 12) - 1)];
+        } else {
+            return 0xAA;
+        }
+    }
+
     /// Get a single byte.
     /// Illegal access will fail silently and return 0.
     /// Does not check access control.
     fn getb(self: *@This(), addr: u32) u8 {
         if (addr >= RamStart and addr < RamStart + RamSize) {
-            return self.ram[addr - RamStart];
-        } else if (addr >= ProgramRomStart and addr < ProgramRomStart + ProgramRomSize) {
-            return self.program_rom[addr - ProgramRomStart];
+            return self.getbRam(addr);
         } else if (addr >= BootRomStart and addr < BootRomStart + BootRomSize) {
             return self.boot_rom[addr - BootRomStart];
         }
