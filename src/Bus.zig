@@ -33,6 +33,8 @@ _load: *const fn (*anyopaque, u32, Width) MemoryError!u32,
 _fetch: *const fn (*anyopaque, u32) MemoryError!u32,
 _setCharDevWriter: *const fn (*anyopaque, *std.io.Writer) void,
 _getStart: *const fn (*anyopaque) u32,
+_stepDevices: *const fn (*anyopaque) void,
+_getTimeAddrs: *const fn (*anyopaque) ?[4]u32,
 
 /// Set the memory at the address to the value, truncated to width bytes.
 /// The maximum width supported is 4, with the minimum being 1.
@@ -86,6 +88,15 @@ pub fn getStart(self: Bus) u32 {
     return self._getStart(self.impl);
 }
 
+pub fn stepDevices(self: Bus) void {
+    return self._stepDevices(self.impl);
+}
+
+/// Get the addresses for mtime, mtimeh, mtimecmp and mtimecmph, in that order
+pub fn getTimeAddrs(self: Bus) ?[4]u32 {
+    return self._getTimeAddrs(self.impl);
+}
+
 pub fn implBy(impl_obj: anytype) Bus {
     const delegate = Bus.BusDelegate(impl_obj);
     return .{
@@ -97,6 +108,8 @@ pub fn implBy(impl_obj: anytype) Bus {
         ._fetch = delegate.fetch,
         ._setCharDevWriter = delegate.setCharDevWriter,
         ._getStart = delegate.getStart,
+        ._stepDevices = delegate.stepDevices,
+        ._getTimeAddrs = delegate.getTimeAddrs,
     };
 }
 
@@ -123,6 +136,12 @@ inline fn BusDelegate(impl_obj: anytype) type {
         }
         pub fn getStart(impl: *anyopaque) u32 {
             return TPtr(ImplType, impl).start;
+        }
+        pub fn stepDevices(impl: *anyopaque) void {
+            TPtr(ImplType, impl).stepDevices();
+        }
+        pub fn getTimeAddrs(impl: *anyopaque) ?[4]u32 {
+            return TPtr(ImplType, impl).getTimeAddrs();
         }
     };
 }

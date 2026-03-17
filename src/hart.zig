@@ -280,6 +280,7 @@ pub const Hart = struct {
         if (self.mtval != 0) try writer.print(" ({s})", .{@tagName(@as(riscv.ExceptionCause, @enumFromInt(self.mcause)))});
         try writer.print("\n", .{});
         try writer.print("cycle = 0x{x:016}\n", .{self.mcycle});
+        try writer.print("time = 0x{x:016}\n", .{self.time});
         try writer.print("instret = 0x{x:016}\n", .{self.minstret});
         try writer.flush();
         if (self.fatal_exception != null) {
@@ -326,11 +327,12 @@ pub const Hart = struct {
         if (self.mtval != 0) try lines.append(allocator, try std.fmt.allocPrint(allocator, " ({s})", .{@tagName(@as(riscv.ExceptionCause, @enumFromInt(self.mcause)))}));
         try lines.append(allocator, try std.fmt.allocPrint(allocator, "\n", .{}));
         try lines.append(allocator, try std.fmt.allocPrint(allocator, "cycle = 0x{x:016}\n", .{self.mcycle}));
+        try lines.append(allocator, try std.fmt.allocPrint(allocator, "time = 0x{x:016}\n", .{self.time}));
         try lines.append(allocator, try std.fmt.allocPrint(allocator, "instret = 0x{x:016}\n", .{self.minstret}));
         if (self.fatal_exception != null) {
-            try lines.append(allocator, try std.fmt.allocPrint(allocator, "\nHalt: Fatal exception: {s}\n", .{@tagName(self.fatal_exception.?)}));
+            try lines.append(allocator, try std.fmt.allocPrint(allocator, "Halt: Fatal exception: {s}\n", .{@tagName(self.fatal_exception.?)}));
         } else if (self.ebreak) {
-            try lines.append(allocator, try std.fmt.allocPrint(allocator, "\nHalt: M-Mode Breakpoint hit\n", .{}));
+            try lines.append(allocator, try std.fmt.allocPrint(allocator, "Halt: M-Mode Breakpoint hit\n", .{}));
         }
 
         var count: usize = 0;
@@ -494,6 +496,7 @@ pub const Hart = struct {
 
         self.flush -|= 1;
         self.pc = self.next_pc;
+        self.bus.stepDevices();
         self.updateCounters(self.execute_buf);
     }
 
@@ -1342,11 +1345,13 @@ pub const Hart = struct {
         if (self.mcounteren & 1 > 0) {
             self.mcycle +%= 1;
         }
-        if (self.mcounteren & 2 > 0) {
-            self.time +%= 1;
-        }
         if (self.mcounteren & 4 > 0 and buf.instruction != 0 and buf.exception == null) {
             self.minstret +%= 1;
+        }
+        const addrs = self.bus.getTimeAddrs();
+        if (addrs != null) {
+            self.time = self.bus.get(addrs.?[0], .word);
+            self.time |= @as(u64, self.bus.get(addrs.?[1], .word)) << 32;
         }
     }
 };

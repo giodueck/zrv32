@@ -11,6 +11,7 @@ impl: *anyopaque,
 addresses: []u32,
 _store: *const fn (*anyopaque, u32, u32, Width) MemoryError!void,
 _load: *const fn (*anyopaque, u32, Width) MemoryError!u32,
+_step: *const fn (*anyopaque) void,
 
 pub fn store(self: MmioDevice, addr: u32, value: u32, width: Width) MemoryError!void {
     try self._store(self.impl, addr, value, width);
@@ -20,6 +21,10 @@ pub fn load(self: MmioDevice, addr: u32, width: Width) MemoryError!u32 {
     return self._load(self.impl, addr, width);
 }
 
+pub fn step(self: MmioDevice) void {
+    return self._step(self.impl);
+}
+
 pub fn implBy(impl_obj: anytype) MmioDevice {
     const delegate = MmioDevice.MmioDeviceDelegate(impl_obj);
     return .{
@@ -27,6 +32,7 @@ pub fn implBy(impl_obj: anytype) MmioDevice {
         .addresses = delegate.getAddresses(impl_obj),
         ._load = delegate.load,
         ._store = delegate.store,
+        ._step = delegate.step,
     };
 }
 
@@ -41,6 +47,9 @@ inline fn MmioDeviceDelegate(impl_obj: anytype) type {
         }
         pub fn getAddresses(impl: *anyopaque) []u32 {
             return TPtr(ImplType, impl).getAddresses();
+        }
+        pub fn step(impl: *anyopaque) void {
+            TPtr(ImplType, impl).step();
         }
     };
 }

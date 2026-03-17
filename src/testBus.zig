@@ -4,15 +4,10 @@ const Bus = @import("Bus.zig");
 const MemoryError = Bus.MemoryError;
 const AccessControl = Bus.AccessControl;
 const Width = Bus.Width;
-const CharDev = @import("CharDev.zig");
 
 pub const TestRamStart: u32 = 0x8000_0000;
 // 1MB of memory for running tests
 pub const TestRamSize: u32 = 0x10_0000;
-
-pub const MmioStart: u32 = 0x0001_0000;
-// 64KB of memory mapped I/O
-pub const MmioSize: u32 = 0x1_0000;
 
 const MemoryMap = .{
     .{
@@ -25,25 +20,6 @@ const MemoryMap = .{
         .start = TestRamStart,
         .size = TestRamSize,
     },
-    .{
-        .name = "Memory mapped I/O",
-        .access = AccessControl{
-            .read = true,
-            .write = true,
-            .io = true,
-        },
-        .start = MmioStart,
-        .size = MmioSize,
-    },
-};
-
-const Devices = enum(u32) {
-    CharDev = 0x1_0000,
-    _,
-};
-
-const DeviceAddresses = .{
-    .CharDev = &[_]u32{0x1_0000},
 };
 
 pub const TestBus = struct {
@@ -56,12 +32,9 @@ pub const TestBus = struct {
     /// This address is used by riscv-tests tests to signal end of the test
     halt_address: u32 = 0x0,
 
-    chardev: CharDev = undefined,
-
     pub fn init(self: *@This(), allocator: std.mem.Allocator) !void {
         self.allocator = allocator;
         self.ram = try self.allocator.alloc(u8, TestRamSize);
-        self.chardev.init(null, DeviceAddresses.CharDev);
         self.start = TestRamStart;
     }
 
@@ -74,7 +47,17 @@ pub const TestBus = struct {
     }
 
     pub fn setCharDevWriter(self: *@This(), writer: *std.io.Writer) void {
-        self.chardev.init(writer, DeviceAddresses.CharDev);
+        _ = self;
+        _ = writer;
+    }
+
+    pub fn stepDevices(self: *@This()) void {
+        _ = self;
+    }
+
+    pub fn getTimeAddrs(self: *@This()) ?[4]u32 {
+        _ = self;
+        return null;
     }
 
     /// Set a single byte.
@@ -135,19 +118,8 @@ pub const TestBus = struct {
             const range = @field(MemoryMap, field.name);
 
             if (addr >= range.start and addr < range.start + range.size and range.access.write) {
-                if (range.access.io) {
-                    switch (@as(Devices, @enumFromInt(addr))) {
-                        _ => {
-                            return MemoryError.StoreAccessFault;
-                        },
-                        .CharDev => {
-                            try self.chardev.store(addr, value, width);
-                        },
-                    }
-                } else {
-                    for (0..@intFromEnum(width)) |i| {
-                        self.setb(addr +% @as(u32, @intCast(i)), @truncate(value >> @intCast(8 * i)));
-                    }
+                for (0..@intFromEnum(width)) |i| {
+                    self.setb(addr +% @as(u32, @intCast(i)), @truncate(value >> @intCast(8 * i)));
                 }
                 return;
             }
@@ -196,19 +168,8 @@ pub const TestBus = struct {
             const range = @field(MemoryMap, field.name);
 
             if (addr >= range.start and addr < range.start + range.size and range.access.read) {
-                if (range.access.io) {
-                    switch (@as(Devices, @enumFromInt(addr))) {
-                        _ => {
-                            return MemoryError.LoadAccessFault;
-                        },
-                        .CharDev => {
-                            return self.chardev.load(addr, width);
-                        },
-                    }
-                } else {
-                    for (0..@intFromEnum(width)) |i| {
-                        ret |= @as(u32, self.getb(addr +% @as(u32, @truncate(i)))) << (8 * @as(u5, @truncate(i)));
-                    }
+                for (0..@intFromEnum(width)) |i| {
+                    ret |= @as(u32, self.getb(addr +% @as(u32, @truncate(i)))) << (8 * @as(u5, @truncate(i)));
                 }
                 return ret;
             }

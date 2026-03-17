@@ -54,6 +54,7 @@ const MemoryError = Bus.MemoryError;
 const AccessControl = Bus.AccessControl;
 const Width = Bus.Width;
 const CharDev = @import("CharDev.zig");
+const CLInt = @import("CLInt.zig");
 
 pub const RamStart: u32 = 0x0004_0000;
 // 64KB of main memory
@@ -111,13 +112,9 @@ const MemoryMap = .{
     },
 };
 
-const Devices = enum(u32) {
-    CharDev = 0x1_0000,
-    _,
-};
-
 const DeviceAddresses = .{
-    .CharDev = &[_]u32{0x1_0000},
+    .chardev = &[_]u32{0x10000},
+    .clint = &[_]u32{ 0x10010, 0x10014, 0x10018, 0x1001c },
 };
 
 pub const StandardBus = struct {
@@ -130,6 +127,7 @@ pub const StandardBus = struct {
     start: u32 = BootRomStart,
 
     chardev: CharDev = undefined,
+    clint: CLInt = undefined,
 
     devices: std.ArrayList(MmioDevice) = std.ArrayList(MmioDevice).empty,
 
@@ -141,8 +139,10 @@ pub const StandardBus = struct {
         self.start = BootRomStart;
 
         self.devices = std.ArrayList(MmioDevice).empty;
-        self.chardev.init(null, DeviceAddresses.CharDev);
+        self.chardev.init(null, DeviceAddresses.chardev);
         try self.devices.append(self.allocator, self.chardev.interface());
+        self.clint.init(DeviceAddresses.clint);
+        try self.devices.append(self.allocator, self.clint.interface());
     }
 
     pub fn deinit(self: *@This()) void {
@@ -157,7 +157,17 @@ pub const StandardBus = struct {
     }
 
     pub fn setCharDevWriter(self: *@This(), writer: *std.io.Writer) void {
-        self.chardev.init(writer, DeviceAddresses.CharDev);
+        self.chardev.init(writer, DeviceAddresses.chardev);
+    }
+
+    pub fn stepDevices(self: *@This()) void {
+        for (self.devices.items) |dev| {
+            dev.step();
+        }
+    }
+
+    pub fn getTimeAddrs(self: *@This()) ?[4]u32 {
+        return self.clint.addresses;
     }
 
     /// Set a single byte.
@@ -184,6 +194,11 @@ pub const StandardBus = struct {
     pub fn set(self: *@This(), addr: u32, value: u32, width: Width) void {
         var bytes_buf: [4]u8 = .{ 0, 0, 0, 0 };
         var bytes: []u8 = undefined;
+
+        if (addr >= MmioStart and addr < MmioSize) {
+            self.store(addr, value, width) catch {};
+            return;
+        }
 
         switch (width) {
             .byte => {
@@ -221,13 +236,11 @@ pub const StandardBus = struct {
 
             if (addr >= range.start and addr < range.start + range.size and range.access.write) {
                 if (range.access.io) {
-                    switch (@as(Devices, @enumFromInt(addr))) {
-                        _ => {
-                            return MemoryError.StoreAccessFault;
-                        },
-                        .CharDev => {
-                            try self.chardev.store(addr, value, width);
-                        },
+                    for (self.devices.items) |dev| {
+                        if (std.mem.indexOfScalar(u32, dev.addresses, addr & 0xFFFF_FFFC)) |_| {
+                            try dev.store(addr, value, width);
+                            return;
+                        }
                     }
                 } else {
                     for (0..@intFromEnum(width)) |i| {
@@ -265,6 +278,12 @@ pub const StandardBus = struct {
     /// Reading from restricted memory is perfectly fine in this method, as it is not meant for emulator use.
     pub fn get(self: *@This(), addr: u32, width: Width) u32 {
         var value: u32 = 0;
+
+        if (addr >= MmioStart and addr < MmioStart + MmioSize) {
+            value = self.load(addr, width) catch 0;
+            return value;
+        }
+
         for (0..@intFromEnum(width)) |i| {
             value |= @as(u32, self.getb(addr +% @as(u32, @truncate(i)))) << (8 * @as(u5, @truncate(i)));
         }
@@ -284,13 +303,10 @@ pub const StandardBus = struct {
 
             if (addr >= range.start and addr < range.start + range.size and range.access.read) {
                 if (range.access.io) {
-                    switch (@as(Devices, @enumFromInt(addr))) {
-                        _ => {
-                            return MemoryError.LoadAccessFault;
-                        },
-                        .CharDev => {
-                            return self.chardev.load(addr, width);
-                        },
+                    for (self.devices.items) |dev| {
+                        if (std.mem.indexOfScalar(u32, dev.addresses, addr & 0xFFFF_FFFC)) |_| {
+                            return dev.load(addr, width);
+                        }
                     }
                 } else {
                     for (0..@intFromEnum(width)) |i| {

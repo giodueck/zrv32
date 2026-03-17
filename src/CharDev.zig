@@ -39,3 +39,7 @@ pub fn load(self: *CharDev, addr: u32, width: Width) MemoryError!u32 {
     if (Bus.isMisaligned(addr, width)) return MemoryError.LoadAddressMisaligned;
     return 0;
 }
+
+pub fn step(self: *CharDev) void {
+    _ = self;
+}
