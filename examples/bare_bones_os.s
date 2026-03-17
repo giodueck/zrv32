@@ -1,3 +1,10 @@
+.equ mtime, 0x10010
+
+    # Reset time to be equal to cycle, just to show the capability off
+    la t0, mtime
+    li t1, 7
+    sw t1, 0(t0)
+
     # Set sp to end of RAM section. It will grow downwards
     lui sp, %hi(0x00050000)
     addi sp, sp, %lo(0x00050000)

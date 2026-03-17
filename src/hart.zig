@@ -113,7 +113,6 @@ pub const Hart = struct {
         self.mstatush.mdt = 1;
         self.mtvec = std.mem.zeroes(riscv.MTrapVector);
         self.mcycle = 0;
-        self.time = 0;
         self.minstret = 0;
         self.mcounteren = 7;
         self.mscratch = 0;
@@ -436,6 +435,7 @@ pub const Hart = struct {
 
     /// Run a single cycle of the CPU, advancing each pipeline stage once
     pub fn step(self: *@This()) void {
+        self.bus.stepDevices();
         if (self.fatal_exception != null) return;
 
         self.next_pc = self.pc +% 4;
@@ -496,7 +496,6 @@ pub const Hart = struct {
 
         self.flush -|= 1;
         self.pc = self.next_pc;
-        self.bus.stepDevices();
         self.updateCounters(self.execute_buf);
     }
 
