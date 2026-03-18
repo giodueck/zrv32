@@ -44,8 +44,13 @@
 - [x] Step through program
 - [x] Reset CPU
 - [x] Intuitive controls
-- [ ] Memory inspector
-- [ ] GUI for more flexible control over input and output
+- [x] GUI for more flexible control over input and output
+    - [x] Register view
+    - [ ] Text output view
+    - [ ] Help screen
+    - [ ] Mode indicator (step, running, halted)
+    - [ ] Variable emulator speed
+    - [ ] Memory inspector
 
 ## Architecture
 

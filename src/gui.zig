@@ -31,29 +31,48 @@ pub fn guiMain(allocator: std.mem.Allocator, hart: *Hart) !void {
     rl.initWindow(screenWidth, screenHeight, "zrv32");
     defer rl.closeWindow(); // Close window and OpenGL context
 
-    // const state_view_title = "Current Hart State";
-    // const logical_state_view_title = "Logical Hart State";
-    // const output_view_title = "Output";
+    var show_logical_state = true;
 
-    // Real hart state output
+    const state_title = "Real Hart State";
+    const logical_state_title = "Logical Hart State";
+    // const output_title = "Output";
+
+    // Real hart state
     var state_str = try hart.allocPrintState(allocator);
     var state_cstr: [:0]u8 = try allocator.dupeZ(u8, state_str);
     defer allocator.free(state_str);
     defer allocator.free(state_cstr);
+
+    // Logical hart state
+    var logical_state_str = try hart.allocPrintLogicalState(allocator);
+    var logical_state_cstr: [:0]u8 = try allocator.dupeZ(u8, logical_state_str.slice);
+    defer logical_state_str.deinit();
+    defer allocator.free(logical_state_cstr);
+
+    // Standalone CSR and priv state, which is not appended to the logical state
+    var csr_state_str = try hart.allocPrintCSRs(allocator);
+    var csr_state_cstr: [:0]u8 = try allocator.dupeZ(u8, csr_state_str);
+    defer allocator.free(csr_state_str);
+    defer allocator.free(csr_state_cstr);
 
     // Text output writer
     var raw_output_writer = std.io.Writer.Allocating.init(allocator);
     defer raw_output_writer.deinit();
     hart.bus.setCharDevWriter(&raw_output_writer.writer);
 
+    // Use a monospaced font instead of the default
     const font = try rl.loadFontFromMemory(".ttf", hack_ttf, 16, &charset);
     defer rl.unloadFont(font);
+    const font_height = 18;
+    const font_width = 8;
 
     rl.setTargetFPS(60); // Set our game to run at 60 frames-per-second
     rl.setExitKey(.null); // Unset ESC as the default exit key
     //--------------------------------------------------------------------------------------
 
     // Main game loop
+    var run = false;
+    const run_steps = 16;
     while (!rl.windowShouldClose()) {
 
         // Update
@@ -61,17 +80,30 @@ pub fn guiMain(allocator: std.mem.Allocator, hart: *Hart) !void {
         // Input
         var step = false;
         var reset = false;
+        var update_outputs = false;
         if (rl.isKeyPressed(.s) or rl.isKeyPressedRepeat(.s)) {
+            if (rl.isKeyDown(.left_shift) or rl.isKeyDown(.right_shift)) {
+                run = !run;
+            }
             step = true;
         }
         if (rl.isKeyPressed(.r)) {
             reset = true;
         }
+        if (rl.isKeyPressed(.t)) {
+            show_logical_state = !show_logical_state;
+            update_outputs = true;
+        }
 
         // Run emulator
-        var update_outputs = false;
-        if (step and !hart.ebreak and hart.fatal_exception == null) {
-            hart.step();
+        if ((run or step) and !hart.ebreak and hart.fatal_exception == null) {
+            if (run) {
+                for (0..run_steps) |_| {
+                    hart.step();
+                }
+            } else {
+                hart.step();
+            }
             update_outputs = true;
         } else if (reset) {
             hart.reset();
@@ -80,10 +112,22 @@ pub fn guiMain(allocator: std.mem.Allocator, hart: *Hart) !void {
 
         // Update outputs
         if (update_outputs) {
-            allocator.free(state_str);
-            allocator.free(state_cstr);
-            state_str = try hart.allocPrintState(allocator);
-            state_cstr = try allocator.dupeZ(u8, state_str);
+            if (show_logical_state) {
+                logical_state_str.deinit();
+                allocator.free(logical_state_cstr);
+                logical_state_str = try hart.allocPrintLogicalState(allocator);
+                logical_state_cstr = try allocator.dupeZ(u8, logical_state_str.slice);
+
+                allocator.free(csr_state_str);
+                allocator.free(csr_state_cstr);
+                csr_state_str = try hart.allocPrintCSRs(allocator);
+                csr_state_cstr = try allocator.dupeZ(u8, csr_state_str);
+            } else {
+                allocator.free(state_str);
+                allocator.free(state_cstr);
+                state_str = try hart.allocPrintState(allocator);
+                state_cstr = try allocator.dupeZ(u8, state_str);
+            }
         }
         //----------------------------------------------------------------------------------
 
@@ -94,7 +138,31 @@ pub fn guiMain(allocator: std.mem.Allocator, hart: *Hart) !void {
 
         rl.clearBackground(rl.Color.init(20, 20, 50, 255));
 
-        rl.drawTextEx(font, state_cstr, .{ .x = 10, .y = 10 }, 16, 0, .light_gray);
+        const text_offset = rl.Vector2.init(10, 10);
+        if (show_logical_state) {
+            rl.drawTextEx(font, logical_state_title, text_offset, 16, 0, .blue);
+
+            if (logical_state_str.hi_end > logical_state_str.hi_begin) {
+                // This text has highlight information
+                var line: i32 = 1;
+                var column: i32 = 0;
+                for (logical_state_str.slice, 0..) |ch, i| {
+                    column += 1;
+                    if (i == logical_state_str.hi_begin) break;
+                    if (ch == '\n') {
+                        line += 1;
+                        column = 0;
+                    }
+                }
+                rl.drawRectangle(@as(i32, @intFromFloat(text_offset.x)) + column * font_width - 1, @as(i32, @intFromFloat(text_offset.y)) + line * font_height - 1, font_width * @as(i32, @intCast(logical_state_str.hi_end - logical_state_str.hi_begin)) + 2, font_height, .dark_blue);
+            }
+            rl.drawTextEx(font, logical_state_cstr, text_offset.add(.{ .x = font_width, .y = font_height }), 16, 0, .light_gray);
+
+            rl.drawTextEx(font, csr_state_cstr, text_offset.add(.{ .x = font_width, .y = font_height * 18 }), 16, 0, .light_gray);
+        } else {
+            rl.drawTextEx(font, state_title, text_offset, 16, 0, .yellow);
+            rl.drawTextEx(font, state_cstr, text_offset.add(.{ .x = font_width, .y = font_height }), 16, 0, .light_gray);
+        }
         //----------------------------------------------------------------------------------
     }
 }
