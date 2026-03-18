@@ -7,6 +7,7 @@ const testBus = @import("testBus.zig");
 const riscv = @import("riscv.zig");
 
 const tui = @import("tui.zig");
+const gui = @import("gui.zig");
 
 pub fn main() !u8 {
     var allocator = std.heap.page_allocator;
@@ -25,12 +26,17 @@ pub fn main() !u8 {
             .names = .{ .short = 'h', .long = "help" },
         },
         .{
+            .id = 't',
+            .names = .{ .short = 't', .long = "test" },
+        },
+        .{
             .id = 's',
             .names = .{ .short = 's', .long = "stdout" },
         },
         .{
-            .id = 't',
-            .names = .{ .short = 't', .long = "test" },
+            .id = 'u',
+            .names = .{ .short = 'u', .long = "ui" },
+            .takes_value = .one,
         },
         .{
             .id = 'a',
@@ -63,13 +69,16 @@ pub fn main() !u8 {
         "A boot binary must be provided. A program binary may be skipped.\n" ++
         "\n" ++
         "Options:\n" ++
-        "   -h  --help      Print this help menu and exit\n" ++
+        "       --haltaddr  When -t is also specified, sets the address at which a store\n" ++
+        "                   will halt the emulator. Default value is 0x80001004 (tohost+4).\n" ++
+        "   -h  --help      Print this help menu and exit.\n" ++
         "   -s  --stdout    Use basic stdout output. This mode only supports running the\n" ++
         "                   emulator until a breakpoint is hit in Machine mode.\n" ++
+        "                   This is an alias of --ui=stdout.\n" ++
         "   -t  --test      Treat the boot binary executable as a test from the riscv-tests\n" ++
         "                   test suite. This loads the program at address 0x8000_0000 instead.\n" ++
-        "       --haltaddr  When -t is also specified, sets the address at which a store\n" ++
-        "                   will halt the emulator. Default value is 0x80001004 (tohost+4)\n" ++
+        "   -u  --ui        Choose a UI. Possible values are: stdout, tui, gui. The default\n" ++
+        "                   value is --ui=tui.\n" ++
         "\n";
 
     var iter = try std.process.ArgIterator.initWithAllocator(arena.allocator());
@@ -87,6 +96,7 @@ pub fn main() !u8 {
     };
 
     var stdout_mode = false;
+    var tui_mode = true; // gui_mode = !tui_mode and !stdout_mode
     var do_test = false;
     var boot_fd: ?std.fs.File = null;
     var boot_filename: ?[]u8 = null;
@@ -115,6 +125,18 @@ pub fn main() !u8 {
             },
             't' => {
                 do_test = true;
+            },
+            'u' => {
+                if (std.mem.eql(u8, arg.value.?, "stdout")) {
+                    stdout_mode = true;
+                    tui_mode = false;
+                } else if (std.mem.eql(u8, arg.value.?, "tui")) {
+                    stdout_mode = false;
+                    tui_mode = true;
+                } else if (std.mem.eql(u8, arg.value.?, "gui")) {
+                    stdout_mode = false;
+                    tui_mode = false;
+                }
             },
             'a' => {
                 haltaddr = try std.fmt.parseInt(u32, arg.value.?, 0);
@@ -229,8 +251,10 @@ pub fn main() !u8 {
         }
 
         try hart.printState();
-    } else {
+    } else if (tui_mode) {
         try tui.tuiMain(allocator, &hart);
+    } else {
+        try gui.guiMain(allocator, &hart);
     }
 
     return 0;
