@@ -154,7 +154,7 @@ pub fn guiMain(allocator: std.mem.Allocator, hart: *Hart) !void {
 
         rl.clearBackground(rl.Color.init(20, 20, 50, 255));
 
-        const text_offset = rl.Vector2.init(10, 10);
+        const text_offset = rl.Vector2.init(10, 14);
 
         // Draw hart state
         const state_size = rl.Vector2.init(48, 29);
@@ -189,9 +189,9 @@ pub fn guiMain(allocator: std.mem.Allocator, hart: *Hart) !void {
 
         // Draw text output
         const text_output_size = rl.Vector2.init(48, 29);
-        rl.drawRectangleRoundedLines(rl.Rectangle.init(text_offset.x + font_width * state_size.x, text_offset.y - 4, font_width * text_output_size.x, font_height * text_output_size.y + 4), 0.05, 4, .sky_blue);
+        const text_output_offset = text_offset.add(state_size.multiply(.{ .x = font_width, .y = 0 })).add(.{ .x = font_width, .y = 0 });
+        rl.drawRectangleRoundedLines(rl.Rectangle.init(text_output_offset.x, text_output_offset.y - 4, font_width * text_output_size.x, font_height * text_output_size.y + 4), 0.05, 4, .sky_blue);
 
-        const text_output_offset = text_offset.add(state_size.multiply(.{ .x = font_width, .y = 0 }));
         rl.drawTextEx(font, text_output_title, text_output_offset.add(.{ .x = 2 * font_width, .y = 0 }), 16, 0, .blue);
 
         rl.drawTextEx(font, text_output_cstr, text_output_offset.add(.{ .x = 1 * font_width, .y = 1 * font_height }), 16, 0, .light_gray);
