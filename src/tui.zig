@@ -190,6 +190,7 @@ pub fn tuiMain(allocator: std.mem.Allocator, hart: *Hart) !void {
             hart.step();
         } else if (reset) {
             hart.reset();
+            raw_output_writer.clearRetainingCapacity();
         }
 
         // Real state

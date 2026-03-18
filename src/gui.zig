@@ -35,7 +35,7 @@ pub fn guiMain(allocator: std.mem.Allocator, hart: *Hart) !void {
 
     const state_title = "Real Hart State";
     const logical_state_title = "Logical Hart State";
-    // const output_title = "Output";
+    const text_output_title = "Output";
 
     // Real hart state
     var state_str = try hart.allocPrintState(allocator);
@@ -56,9 +56,11 @@ pub fn guiMain(allocator: std.mem.Allocator, hart: *Hart) !void {
     defer allocator.free(csr_state_cstr);
 
     // Text output writer
-    var raw_output_writer = std.io.Writer.Allocating.init(allocator);
-    defer raw_output_writer.deinit();
-    hart.bus.setCharDevWriter(&raw_output_writer.writer);
+    var text_output_writer = std.io.Writer.Allocating.init(allocator);
+    defer text_output_writer.deinit();
+    hart.bus.setCharDevWriter(&text_output_writer.writer);
+    var text_output_cstr = try allocator.dupeZ(u8, text_output_writer.written());
+    defer allocator.free(text_output_cstr);
 
     // Use a monospaced font instead of the default
     const font = try rl.loadFontFromMemory(".ttf", hack_ttf, 16, &charset);
@@ -96,18 +98,24 @@ pub fn guiMain(allocator: std.mem.Allocator, hart: *Hart) !void {
         }
 
         // Run emulator
-        if ((run or step) and !hart.ebreak and hart.fatal_exception == null) {
-            if (run) {
-                for (0..run_steps) |_| {
-                    hart.step();
-                }
-            } else {
+        if (hart.ebreak or hart.fatal_exception != null) {
+            run = false;
+            step = false;
+            halted = true;
+        }
+        if (run) {
+            for (0..run_steps) |_| {
                 hart.step();
             }
             update_outputs = true;
+        } else if (step) {
+            hart.step();
+            update_outputs = true;
         } else if (reset) {
             hart.reset();
+            text_output_writer.clearRetainingCapacity();
             update_outputs = true;
+            halted = false;
         }
 
         // Update outputs
@@ -128,6 +136,8 @@ pub fn guiMain(allocator: std.mem.Allocator, hart: *Hart) !void {
                 state_str = try hart.allocPrintState(allocator);
                 state_cstr = try allocator.dupeZ(u8, state_str);
             }
+            allocator.free(text_output_cstr);
+            text_output_cstr = try allocator.dupeZ(u8, text_output_writer.written());
         }
         //----------------------------------------------------------------------------------
 
@@ -139,8 +149,13 @@ pub fn guiMain(allocator: std.mem.Allocator, hart: *Hart) !void {
         rl.clearBackground(rl.Color.init(20, 20, 50, 255));
 
         const text_offset = rl.Vector2.init(10, 10);
+
+        // Draw hart state
+        const state_size = rl.Vector2.init(48, 29);
+        rl.drawRectangleRoundedLines(rl.Rectangle.init(text_offset.x, text_offset.y - 4, font_width * state_size.x, font_height * state_size.y + 4), 0.05, 4, .sky_blue);
+
         if (show_logical_state) {
-            rl.drawTextEx(font, logical_state_title, text_offset, 16, 0, .blue);
+            rl.drawTextEx(font, logical_state_title, text_offset.add(.{ .x = 2 * font_width, .y = 0 }), 16, 0, .blue);
 
             if (logical_state_str.hi_end > logical_state_str.hi_begin) {
                 // This text has highlight information
@@ -154,15 +169,24 @@ pub fn guiMain(allocator: std.mem.Allocator, hart: *Hart) !void {
                         column = 0;
                     }
                 }
-                rl.drawRectangle(@as(i32, @intFromFloat(text_offset.x)) + column * font_width - 1, @as(i32, @intFromFloat(text_offset.y)) + line * font_height - 1, font_width * @as(i32, @intCast(logical_state_str.hi_end - logical_state_str.hi_begin)) + 2, font_height, .dark_blue);
+                rl.drawRectangleRounded(.{ .x = @floatFromInt(@as(i32, @intFromFloat(text_offset.x)) + column * font_width - 1), .y = @floatFromInt(@as(i32, @intFromFloat(text_offset.y)) + line * font_height - 1), .width = @floatFromInt(font_width * @as(i32, @intCast(logical_state_str.hi_end - logical_state_str.hi_begin)) + 2), .height = @floatFromInt(font_height) }, 0.2, 2, .dark_blue);
             }
             rl.drawTextEx(font, logical_state_cstr, text_offset.add(.{ .x = font_width, .y = font_height }), 16, 0, .light_gray);
 
             rl.drawTextEx(font, csr_state_cstr, text_offset.add(.{ .x = font_width, .y = font_height * 18 }), 16, 0, .light_gray);
         } else {
-            rl.drawTextEx(font, state_title, text_offset, 16, 0, .yellow);
+            rl.drawTextEx(font, state_title, text_offset.add(.{ .x = 2 * font_width, .y = 0 }), 16, 0, .yellow);
             rl.drawTextEx(font, state_cstr, text_offset.add(.{ .x = font_width, .y = font_height }), 16, 0, .light_gray);
         }
+
+        // Draw text output
+        const text_output_size = rl.Vector2.init(48, 29);
+        rl.drawRectangleRoundedLines(rl.Rectangle.init(text_offset.x + font_width * state_size.x, text_offset.y - 4, font_width * text_output_size.x, font_height * text_output_size.y + 4), 0.05, 4, .sky_blue);
+
+        const text_output_offset = text_offset.add(state_size.multiply(.{ .x = font_width, .y = 0 }));
+        rl.drawTextEx(font, text_output_title, text_output_offset.add(.{ .x = 2 * font_width, .y = 0 }), 16, 0, .blue);
+
+        rl.drawTextEx(font, text_output_cstr, text_output_offset.add(.{ .x = 1 * font_width, .y = 1 * font_height }), 16, 0, .light_gray);
         //----------------------------------------------------------------------------------
     }
 }
