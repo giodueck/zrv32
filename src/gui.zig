@@ -75,7 +75,12 @@ pub fn guiMain(allocator: std.mem.Allocator, hart: *Hart) !void {
     // Main game loop
     var run = false;
     const run_steps = 16;
+    var halted = false;
+    // For indicating the emulator is running for a few frames if only a step was taken
+    var step_indicator: u32 = 0;
+    const step_indicator_count = 5;
     while (!rl.windowShouldClose()) {
+        defer step_indicator -|= 1;
 
         // Update
         //----------------------------------------------------------------------------------
@@ -88,6 +93,7 @@ pub fn guiMain(allocator: std.mem.Allocator, hart: *Hart) !void {
                 run = !run;
             }
             step = true;
+            step_indicator = step_indicator_count;
         }
         if (rl.isKeyPressed(.r)) {
             reset = true;
@@ -153,6 +159,8 @@ pub fn guiMain(allocator: std.mem.Allocator, hart: *Hart) !void {
         // Draw hart state
         const state_size = rl.Vector2.init(48, 29);
         rl.drawRectangleRoundedLines(rl.Rectangle.init(text_offset.x, text_offset.y - 4, font_width * state_size.x, font_height * state_size.y + 4), 0.05, 4, .sky_blue);
+
+        rl.drawCircle(@as(i32, @intFromFloat(text_offset.x)) + @as(i32, @intFromFloat(state_size.x - 2)) * font_width + @divTrunc(font_width, 2), @as(i32, @intFromFloat(text_offset.y)) + @divTrunc(font_height, 2), 8, if (halted) .red else if (run or step_indicator > 0) .green else .yellow);
 
         if (show_logical_state) {
             rl.drawTextEx(font, logical_state_title, text_offset.add(.{ .x = 2 * font_width, .y = 0 }), 16, 0, .blue);

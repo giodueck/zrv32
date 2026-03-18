@@ -46,9 +46,11 @@
 - [x] Intuitive controls
 - [x] GUI for more flexible control over input and output
     - [x] Register view
-    - [ ] Text output view
+    - [x] Text output view
+        - [ ] ANSI escape sequences
+        - [ ] Wrapping text
     - [ ] Help screen
-    - [ ] Mode indicator (step, running, halted)
+    - [x] Mode indicator (step, running, halted)
     - [ ] Variable emulator speed
     - [ ] Memory inspector
 
