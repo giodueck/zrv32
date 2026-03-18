@@ -77,8 +77,16 @@ pub fn guiMain(allocator: std.mem.Allocator, hart: *Hart) !void {
     rl.initWindow(screenWidth, screenHeight, "zrv32");
     defer rl.closeWindow(); // Close window and OpenGL context
 
-    var show_logical_state = true;
+    // Colors used in drawing
+    const title_color: rl.Color = .blue;
+    const text_color: rl.Color = .light_gray;
+    const secondary_text_color: rl.Color = .gray;
+    const highlight_color: rl.Color = .dark_blue;
+    const border_color: rl.Color = .sky_blue;
+    const keybind_color: rl.Color = .purple;
+    const semaphore_colors: [3]rl.Color = [_]rl.Color{ .red, .yellow, .green };
 
+    // Section titles
     const state_title = "Real Hart State";
     const logical_state_title = "Logical Hart State";
     const text_output_title = "Output";
@@ -121,21 +129,23 @@ pub fn guiMain(allocator: std.mem.Allocator, hart: *Hart) !void {
     rl.setExitKey(.null); // Unset ESC as the default exit key
     //--------------------------------------------------------------------------------------
 
-    // Main game loop
+    // Main loop variables
     var current_screen: Screen = .state;
 
+    // State screen variables
+    var show_logical_state = true;
     var run = false;
     const run_steps = 16;
     var halted = false;
-    // For indicating the emulator is running for a few frames if only a step was taken
-    var step_indicator: u32 = 0;
+    var step_indicator: u32 = 0; // For indicating the emulator is running for a few frames if only a step was taken
     const step_indicator_count = 5;
+
+    // Main loop
     while (!rl.windowShouldClose()) {
         defer step_indicator -|= 1;
 
         // Update
         //----------------------------------------------------------------------------------
-        // Input
         var step = false;
         var reset = false;
         var update_outputs = false;
@@ -229,13 +239,13 @@ pub fn guiMain(allocator: std.mem.Allocator, hart: *Hart) !void {
 
                 // Draw hart state
                 const state_size = rl.Vector2.init(48, 29);
-                rl.drawRectangleRoundedLines(rl.Rectangle.init(text_offset.x, text_offset.y - 4, font_width * state_size.x, font_height * state_size.y + 4), 0.05, 4, .sky_blue);
+                rl.drawRectangleRoundedLines(rl.Rectangle.init(text_offset.x, text_offset.y - 4, font_width * state_size.x, font_height * state_size.y + 4), 0.05, 4, border_color);
 
                 // Hart running indicator
-                rl.drawCircle(@as(i32, @intFromFloat(text_offset.x)) + @as(i32, @intFromFloat(state_size.x - 2)) * font_width + @divTrunc(font_width, 2), @as(i32, @intFromFloat(text_offset.y)) + @divTrunc(font_height, 2), 8, if (halted) .red else if (run or step_indicator > 0) .green else .yellow);
+                rl.drawCircle(@as(i32, @intFromFloat(text_offset.x)) + @as(i32, @intFromFloat(state_size.x - 2)) * font_width + @divTrunc(font_width, 2), @as(i32, @intFromFloat(text_offset.y)) + @divTrunc(font_height, 2), 8, if (halted) semaphore_colors[0] else if (run or step_indicator > 0) semaphore_colors[2] else semaphore_colors[1]);
 
                 if (show_logical_state) {
-                    rl.drawTextEx(font, logical_state_title, text_offset.add(.{ .x = 2 * font_width, .y = 0 }), 16, 0, .blue);
+                    rl.drawTextEx(font, logical_state_title, text_offset.add(.{ .x = 2 * font_width, .y = 0 }), 16, 0, title_color);
 
                     if (logical_state_str.hi_end > logical_state_str.hi_begin) {
                         // This text has highlight information
@@ -249,39 +259,36 @@ pub fn guiMain(allocator: std.mem.Allocator, hart: *Hart) !void {
                                 column = 0;
                             }
                         }
-                        rl.drawRectangleRounded(.{ .x = @floatFromInt(@as(i32, @intFromFloat(text_offset.x)) + column * font_width - 1), .y = @floatFromInt(@as(i32, @intFromFloat(text_offset.y)) + line * font_height - 1), .width = @floatFromInt(font_width * @as(i32, @intCast(logical_state_str.hi_end - logical_state_str.hi_begin)) + 2), .height = @floatFromInt(font_height) }, 0.2, 2, .dark_blue);
+                        rl.drawRectangleRounded(.{ .x = @floatFromInt(@as(i32, @intFromFloat(text_offset.x)) + column * font_width - 1), .y = @floatFromInt(@as(i32, @intFromFloat(text_offset.y)) + line * font_height - 1), .width = @floatFromInt(font_width * @as(i32, @intCast(logical_state_str.hi_end - logical_state_str.hi_begin)) + 2), .height = @floatFromInt(font_height) }, 0.2, 2, highlight_color);
                     }
-                    rl.drawTextEx(font, logical_state_cstr, text_offset.add(.{ .x = font_width, .y = font_height }), 16, 0, .light_gray);
+                    rl.drawTextEx(font, logical_state_cstr, text_offset.add(.{ .x = font_width, .y = font_height }), 16, 0, text_color);
 
-                    rl.drawTextEx(font, csr_state_cstr, text_offset.add(.{ .x = font_width, .y = font_height * 18 }), 16, 0, .light_gray);
+                    rl.drawTextEx(font, csr_state_cstr, text_offset.add(.{ .x = font_width, .y = font_height * 18 }), 16, 0, text_color);
                 } else {
                     // Real hart state
-                    rl.drawTextEx(font, state_title, text_offset.add(.{ .x = 2 * font_width, .y = 0 }), 16, 0, .yellow);
-                    rl.drawTextEx(font, state_cstr, text_offset.add(.{ .x = font_width, .y = font_height }), 16, 0, .light_gray);
+                    rl.drawTextEx(font, state_title, text_offset.add(.{ .x = 2 * font_width, .y = 0 }), 16, 0, title_color);
+                    rl.drawTextEx(font, state_cstr, text_offset.add(.{ .x = font_width, .y = font_height }), 16, 0, text_color);
                 }
 
                 // Draw text output
                 const text_output_size = rl.Vector2.init(48, 29);
                 const text_output_offset = text_offset.add(state_size.multiply(.{ .x = font_width, .y = 0 })).add(.{ .x = font_width, .y = 0 });
-                rl.drawRectangleRoundedLines(rl.Rectangle.init(text_output_offset.x, text_output_offset.y - 4, font_width * text_output_size.x, font_height * text_output_size.y + 4), 0.05, 4, .sky_blue);
+                rl.drawRectangleRoundedLines(rl.Rectangle.init(text_output_offset.x, text_output_offset.y - 4, font_width * text_output_size.x, font_height * text_output_size.y + 4), 0.05, 4, border_color);
 
-                rl.drawTextEx(font, text_output_title, text_output_offset.add(.{ .x = 2 * font_width, .y = 0 }), 16, 0, .blue);
+                rl.drawTextEx(font, text_output_title, text_output_offset.add(.{ .x = 2 * font_width, .y = 0 }), 16, 0, title_color);
 
-                rl.drawTextEx(font, text_output_cstr, text_output_offset.add(.{ .x = 1 * font_width, .y = 1 * font_height }), 16, 0, .light_gray);
+                rl.drawTextEx(font, text_output_cstr, text_output_offset.add(.{ .x = 1 * font_width, .y = 1 * font_height }), 16, 0, text_color);
 
                 // Draw help hint
-                rl.drawTextEx(font, "Press ", text_offset.add(state_size.multiply(.{ .x = 0, .y = font_height })).add(.{ .x = 0, .y = font_height }), 16, 0, .gray);
-                rl.drawTextEx(font, "h", text_offset.add(state_size.multiply(.{ .x = 0, .y = font_height })).add(.{ .x = font_width * 6, .y = font_height }), 16, 0, .purple);
-                rl.drawTextEx(font, " for help", text_offset.add(state_size.multiply(.{ .x = 0, .y = font_height })).add(.{ .x = font_width * 7, .y = font_height }), 16, 0, .gray);
+                rl.drawTextEx(font, "Press ", text_offset.add(state_size.multiply(.{ .x = 0, .y = font_height })).add(.{ .x = 0, .y = font_height }), 16, 0, secondary_text_color);
+                rl.drawTextEx(font, "h", text_offset.add(state_size.multiply(.{ .x = 0, .y = font_height })).add(.{ .x = font_width * 6, .y = font_height }), 16, 0, keybind_color);
+                rl.drawTextEx(font, " for help", text_offset.add(state_size.multiply(.{ .x = 0, .y = font_height })).add(.{ .x = font_width * 7, .y = font_height }), 16, 0, secondary_text_color);
             },
-            .help => {
-                const title_color: rl.Color = .blue;
-                const keybind_color: rl.Color = .purple;
-                const description_color: rl.Color = .light_gray;
 
+            .help => {
                 const text_offset = rl.Vector2.init(10, 14);
                 const help_size = rl.Vector2.init(97, 29);
-                rl.drawRectangleRoundedLines(rl.Rectangle.init(text_offset.x, text_offset.y - 4, font_width * help_size.x, font_height * help_size.y + 4), 0.035, 4, .sky_blue);
+                rl.drawRectangleRoundedLines(rl.Rectangle.init(text_offset.x, text_offset.y - 4, font_width * help_size.x, font_height * help_size.y + 4), 0.035, 4, border_color);
 
                 rl.drawTextEx(font, "Keybind help", text_offset.add(.{ .x = 2 * font_width, .y = 0 }), 16, 0, title_color);
 
@@ -309,10 +316,10 @@ pub fn guiMain(allocator: std.mem.Allocator, hart: *Hart) !void {
                                 rl.drawTextEx(font, getKeyName(key), text_offset.add(.{ .x = @floatFromInt((2 + offset) * font_width), .y = @floatFromInt(line * font_height) }), 16, 0, keybind_color);
                                 offset += @intCast(getKeyName(key).len);
                             }
-                            rl.drawTextEx(font, ": ", text_offset.add(.{ .x = @floatFromInt((2 + offset) * font_width), .y = @floatFromInt(line * font_height) }), 16, 0, description_color);
+                            rl.drawTextEx(font, ": ", text_offset.add(.{ .x = @floatFromInt((2 + offset) * font_width), .y = @floatFromInt(line * font_height) }), 16, 0, text_color);
                             offset += 2;
 
-                            rl.drawTextEx(font, bind.description, text_offset.add(.{ .x = @floatFromInt((2 + offset) * font_width), .y = @floatFromInt(line * font_height) }), 16, 0, description_color);
+                            rl.drawTextEx(font, bind.description, text_offset.add(.{ .x = @floatFromInt((2 + offset) * font_width), .y = @floatFromInt(line * font_height) }), 16, 0, text_color);
                             line += 1;
                         }
                     }

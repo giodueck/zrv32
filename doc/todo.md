@@ -47,8 +47,8 @@
 - [x] GUI for more flexible control over input and output
     - [x] Register view
     - [x] Text output view
-        - [ ] ANSI escape sequences
         - [ ] Wrapping text
+        - [ ] ANSI escape sequences
     - [x] Help screen
     - [x] Mode indicator (step, running, halted)
     - [ ] Variable emulator speed
