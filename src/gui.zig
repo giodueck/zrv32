@@ -334,7 +334,7 @@ pub fn guiMain(allocator: std.mem.Allocator, hart: *Hart) !void {
                     ),
                     .font_size = 16,
                     .spacing = 0,
-                    .word_wrap = false,
+                    .word_wrap = true,
                     .color = text_color,
                 };
                 text_output_box.drawText(text_output_cstr);
@@ -406,9 +406,11 @@ const TextBox = struct {
     spacing: f32,
     color: rl.Color,
     word_wrap: bool,
+    tabstop: i32 = 4,
 
     pub fn drawText(self: @This(), text: [:0]u8) void {
         var text_offset: rl.Vector2 = .{ .x = 0, .y = 0 };
+        var column: i32 = 0; // For tab expansion
 
         const scale_factor = self.font_size / @as(f32, @floatFromInt(self.font.baseSize)); // Character rectangle scaling factor
 
@@ -437,13 +439,23 @@ const TextBox = struct {
             i += @intCast(codepoint_byte_count - 1);
 
             var glyph_width: f32 = 0;
+            var tab_width: i32 = 0;
             if (codepoint != '\n') {
                 glyph_width = if (self.font.glyphs[index].advanceX == 0) self.font.recs[index].width * scale_factor else @as(f32, @floatFromInt(self.font.glyphs[index].advanceX));
+
+                // Expand tabs
+                if (codepoint == '\t') {
+                    tab_width = self.tabstop - @mod(column, self.tabstop);
+                    tab_width = if (tab_width > 0) tab_width else self.tabstop;
+                    const space_index: usize = @intCast(rl.getGlyphIndex(self.font, ' '));
+                    glyph_width = @as(f32, @floatFromInt(tab_width)) * @as(f32, @floatFromInt(self.font.glyphs[space_index].advanceX));
+                }
 
                 if (i + 1 < text.len) glyph_width += self.spacing;
             }
 
             if (state == .measure) {
+                // Word delimiters
                 if (codepoint == ' ' or codepoint == '\t' or codepoint == '\n') end_line = @intCast(i);
 
                 if (text_offset.x + glyph_width > self.rect.width) {
@@ -461,6 +473,7 @@ const TextBox = struct {
 
                 if (state == .draw) {
                     text_offset.x = 0;
+                    column = 0;
                     i = start_line;
                     glyph_width = 0;
 
@@ -476,12 +489,14 @@ const TextBox = struct {
                         const bs: f32 = @floatFromInt(self.font.baseSize);
                         text_offset.y += bs * scale_factor;
                         text_offset.x = 0;
+                        column = 0;
                     }
                 } else {
                     if (!self.word_wrap and text_offset.x + glyph_width > self.rect.width) {
                         const bs: f32 = @floatFromInt(self.font.baseSize);
                         text_offset.y += bs * scale_factor;
                         text_offset.x = 0;
+                        column = 0;
                     }
 
                     // When text overflows rectangle height, stop drawing
@@ -497,6 +512,7 @@ const TextBox = struct {
                     const bs: f32 = @floatFromInt(self.font.baseSize);
                     text_offset.y += bs * scale_factor;
                     text_offset.x = 0;
+                    column = 0;
                     start_line = end_line;
                     end_line = -1;
                     glyph_width = 0;
@@ -508,6 +524,7 @@ const TextBox = struct {
 
             // No filtering by codepoint or spaces, leading spaces are a feature
             text_offset.x += glyph_width;
+            column += if (glyph_width > 0) (if (codepoint == '\t') tab_width else 1) else 0;
         }
     }
 };
