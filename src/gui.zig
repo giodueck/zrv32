@@ -182,9 +182,10 @@ pub fn guiMain(allocator: std.mem.Allocator, hart: *Hart) !void {
                 if (rl.isKeyPressed(.s) or rl.isKeyPressedRepeat(.s)) {
                     if (rl.isKeyDown(.left_shift) or rl.isKeyDown(.right_shift)) {
                         run = !run;
+                    } else {
+                        step = true;
+                        step_indicator = step_indicator_count;
                     }
-                    step = true;
-                    step_indicator = step_indicator_count;
                 }
                 if (rl.isKeyPressed(.r)) {
                     reset = true;
@@ -323,7 +324,20 @@ pub fn guiMain(allocator: std.mem.Allocator, hart: *Hart) !void {
 
                 rl.drawTextEx(font, text_output_title, text_output_offset.add(.{ .x = 2 * font_width, .y = 0 }), 16, 0, title_color);
 
-                rl.drawTextEx(font, text_output_cstr, text_output_offset.add(.{ .x = 1 * font_width, .y = 1 * font_height }), 16, 0, text_color);
+                const text_output_box: TextBox = .{
+                    .font = font,
+                    .rect = rl.Rectangle.init(
+                        text_output_offset.x + 1 * font_width,
+                        text_output_offset.y + 1 * font_height,
+                        font_width * text_output_size.x - 2 * font_width,
+                        font_height * text_output_size.y - 1 * font_height,
+                    ),
+                    .font_size = 16,
+                    .spacing = 0,
+                    .word_wrap = false,
+                    .color = text_color,
+                };
+                text_output_box.drawText(text_output_cstr);
 
                 // Draw help hint
                 rl.drawTextEx(font, "Press ", text_offset.add(state_size.multiply(.{ .x = 0, .y = font_height })).add(.{ .x = 0, .y = font_height }), 16, 0, secondary_text_color);
@@ -383,3 +397,117 @@ fn getKeyName(key: rl.KeyboardKey) [:0]const u8 {
         else => rl.getKeyName(key),
     };
 }
+
+/// Draw text constrained by a rectangle and with wrapping on characters or space-separated words
+const TextBox = struct {
+    rect: rl.Rectangle,
+    font: rl.Font,
+    font_size: f32,
+    spacing: f32,
+    color: rl.Color,
+    word_wrap: bool,
+
+    pub fn drawText(self: @This(), text: [:0]u8) void {
+        var text_offset: rl.Vector2 = .{ .x = 0, .y = 0 };
+
+        const scale_factor = self.font_size / @as(f32, @floatFromInt(self.font.baseSize)); // Character rectangle scaling factor
+
+        // Index to begin drawing a line
+        var start_line: i32 = -1;
+        // Index to stop drawing a line
+        var end_line: i32 = -1;
+        // Last value of the character position
+        var last_char: i32 = -1;
+
+        // State machine variables
+        const State = enum { measure, draw };
+        var state: State = if (self.word_wrap) .measure else .draw;
+
+        var i: i32 = 0;
+        var k: i32 = 0;
+        while (i < text.len) : ({
+            i += 1;
+            k += 1;
+        }) {
+            var codepoint_byte_count: i32 = 0;
+            const codepoint = rl.getCodepoint(text[@intCast(i)..], &codepoint_byte_count);
+            const index: usize = @intCast(rl.getGlyphIndex(self.font, codepoint));
+
+            if (codepoint == 0x3f) codepoint_byte_count = 1;
+            i += @intCast(codepoint_byte_count - 1);
+
+            var glyph_width: f32 = 0;
+            if (codepoint != '\n') {
+                glyph_width = if (self.font.glyphs[index].advanceX == 0) self.font.recs[index].width * scale_factor else @as(f32, @floatFromInt(self.font.glyphs[index].advanceX));
+
+                if (i + 1 < text.len) glyph_width += self.spacing;
+            }
+
+            if (state == .measure) {
+                if (codepoint == ' ' or codepoint == '\t' or codepoint == '\n') end_line = @intCast(i);
+
+                if (text_offset.x + glyph_width > self.rect.width) {
+                    end_line = if (end_line < 1) @intCast(i) else end_line;
+                    if (i == end_line) end_line -= codepoint_byte_count;
+                    if (start_line + codepoint_byte_count == end_line) end_line = i - codepoint_byte_count;
+
+                    state = .draw;
+                } else if (i + 1 == text.len) {
+                    end_line = i;
+                    state = .draw;
+                } else if (codepoint == '\n') {
+                    state = .draw;
+                }
+
+                if (state == .draw) {
+                    text_offset.x = 0;
+                    i = start_line;
+                    glyph_width = 0;
+
+                    // Save character position when switching states
+                    const tmp = last_char;
+                    last_char = k - 1;
+                    k = tmp;
+                }
+            } else {
+                // state == .draw
+                if (codepoint == '\n') {
+                    if (!self.word_wrap) {
+                        const bs: f32 = @floatFromInt(self.font.baseSize);
+                        text_offset.y += bs * scale_factor;
+                        text_offset.x = 0;
+                    }
+                } else {
+                    if (!self.word_wrap and text_offset.x + glyph_width > self.rect.width) {
+                        const bs: f32 = @floatFromInt(self.font.baseSize);
+                        text_offset.y += bs * scale_factor;
+                        text_offset.x = 0;
+                    }
+
+                    // When text overflows rectangle height, stop drawing
+                    if (text_offset.y + @as(f32, @floatFromInt(self.font.baseSize)) * scale_factor > self.rect.height) break;
+
+                    // Draw current character glyph
+                    if (codepoint != ' ' and codepoint != '\t') {
+                        rl.drawTextCodepoint(self.font, codepoint, text_offset.add(.{ .x = self.rect.x, .y = self.rect.y }), self.font_size, self.color);
+                    }
+                }
+
+                if (self.word_wrap and i == end_line) {
+                    const bs: f32 = @floatFromInt(self.font.baseSize);
+                    text_offset.y += bs * scale_factor;
+                    text_offset.x = 0;
+                    start_line = end_line;
+                    end_line = -1;
+                    glyph_width = 0;
+                    k = last_char;
+
+                    state = if (state == .draw) .measure else .draw;
+                }
+            }
+
+            // No filtering by codepoint or spaces, leading spaces are a feature
+            text_offset.x += glyph_width;
+        }
+    }
+};

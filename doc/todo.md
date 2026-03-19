@@ -47,7 +47,7 @@
 - [x] GUI for more flexible control over input and output
     - [x] Register view
     - [x] Text output view
-        - [ ] Wrapping text
+        - [x] Wrapping text
         - [ ] ANSI escape sequences
     - [x] Help screen
     - [x] Mode indicator (step, running, halted)
