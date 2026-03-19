@@ -36,6 +36,11 @@ const KeyBindHelp = struct {
 const Keybinds = [_]KeyBindHelp{
     .{
         .screen = .state,
+        .keys = &.{rl.KeyboardKey.h},
+        .description = "Show this help screen",
+    },
+    .{
+        .screen = .state,
         .keys = &.{rl.KeyboardKey.r},
         .description = "Reset the hart, which sets the CSRs and PC to their reset value",
     },
@@ -57,8 +62,25 @@ const Keybinds = [_]KeyBindHelp{
     },
     .{
         .screen = .state,
-        .keys = &.{rl.KeyboardKey.h},
-        .description = "Show this help screen",
+        .keys = &.{rl.KeyboardKey.comma},
+        .description = "Reduce the frequency of the emulator when running continuously by 60 Hz",
+    },
+    .{
+        .screen = .state,
+        .keys = &.{rl.KeyboardKey.period},
+        .description = "Increase the frequency of the emulator when running continuously by 60 Hz",
+    },
+    .{
+        .screen = .state,
+        .keys = &.{rl.KeyboardKey.comma},
+        .mods = &.{.Shift},
+        .description = "Halve the frequency of the emulator when running continuously",
+    },
+    .{
+        .screen = .state,
+        .keys = &.{rl.KeyboardKey.period},
+        .mods = &.{.Shift},
+        .description = "Double the frequency of the emulator when running continuously",
     },
 
     .{
@@ -116,6 +138,10 @@ pub fn guiMain(allocator: std.mem.Allocator, hart: *Hart) !void {
     var text_output_cstr = try allocator.dupeZ(u8, text_output_writer.written());
     defer allocator.free(text_output_cstr);
 
+    // General purpose text buffer
+    const gp_buffer = try allocator.allocSentinel(u8, 1024, 0);
+    defer allocator.free(gp_buffer);
+
     // Use a monospaced font instead of the default
     const font = try rl.loadFontFromMemory(".ttf", hack_ttf, 16, &charset);
     defer rl.unloadFont(font);
@@ -125,7 +151,8 @@ pub fn guiMain(allocator: std.mem.Allocator, hart: *Hart) !void {
     const title_font = try rl.loadFontFromMemory(".ttf", hack_ttf, 20, &charset);
     defer rl.unloadFont(title_font);
 
-    rl.setTargetFPS(60); // Set our game to run at 60 frames-per-second
+    const target_fps = 60;
+    rl.setTargetFPS(target_fps); // Set our game to run at 60 frames-per-second
     rl.setExitKey(.null); // Unset ESC as the default exit key
     //--------------------------------------------------------------------------------------
 
@@ -135,7 +162,7 @@ pub fn guiMain(allocator: std.mem.Allocator, hart: *Hart) !void {
     // State screen variables
     var show_logical_state = true;
     var run = false;
-    const run_steps = 16;
+    var run_steps: u32 = 16; // Steps per frame
     var halted = false;
     var step_indicator: u32 = 0; // For indicating the emulator is running for a few frames if only a step was taken
     const step_indicator_count = 5;
@@ -166,6 +193,20 @@ pub fn guiMain(allocator: std.mem.Allocator, hart: *Hart) !void {
                     show_logical_state = !show_logical_state;
                     update_outputs = true;
                 }
+                if (rl.isKeyPressed(.period) or rl.isKeyPressedRepeat(.period)) {
+                    if (rl.isKeyDown(.left_shift) or rl.isKeyDown(.right_shift)) {
+                        run_steps <<|= 1;
+                    } else {
+                        run_steps +|= 1;
+                    }
+                }
+                if (rl.isKeyPressed(.comma) or rl.isKeyPressedRepeat(.comma)) {
+                    if (rl.isKeyDown(.left_shift) or rl.isKeyDown(.right_shift)) {
+                        if (run_steps >= 2) run_steps >>= 1;
+                    } else if (run_steps > 1) {
+                        run_steps -= 1;
+                    }
+                }
 
                 // Switch screens, cancel all previous inputs that advance the emulator
                 if (rl.isKeyPressed(.h)) {
@@ -183,6 +224,7 @@ pub fn guiMain(allocator: std.mem.Allocator, hart: *Hart) !void {
                 }
                 if (run) {
                     for (0..run_steps) |_| {
+                        if (hart.ebreak or hart.fatal_exception != null) break;
                         hart.step();
                     }
                     update_outputs = true;
@@ -241,7 +283,11 @@ pub fn guiMain(allocator: std.mem.Allocator, hart: *Hart) !void {
                 const state_size = rl.Vector2.init(48, 29);
                 rl.drawRectangleRoundedLines(rl.Rectangle.init(text_offset.x, text_offset.y - 4, font_width * state_size.x, font_height * state_size.y + 4), 0.05, 4, border_color);
 
-                // Hart running indicator
+                // Hart frequency
+                const freq_cstr = try std.fmt.bufPrintZ(gp_buffer, "{d} Hz", .{@as(u64, run_steps) * target_fps});
+                rl.drawTextEx(font, freq_cstr, text_offset.add(.{ .x = (state_size.x - 3) * font_width - @as(f32, @floatFromInt(freq_cstr.len * font_width)), .y = 0 }), 16, 0, semaphore_colors[2]);
+
+                // Running indicator
                 rl.drawCircle(@as(i32, @intFromFloat(text_offset.x)) + @as(i32, @intFromFloat(state_size.x - 2)) * font_width + @divTrunc(font_width, 2), @as(i32, @intFromFloat(text_offset.y)) + @divTrunc(font_height, 2), 8, if (halted) semaphore_colors[0] else if (run or step_indicator > 0) semaphore_colors[2] else semaphore_colors[1]);
 
                 if (show_logical_state) {

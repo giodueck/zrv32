@@ -14,7 +14,7 @@ cwd=<root>
 output=quickfix
 
 [build-release]
-command=zig build --release
+command=zig build --release=fast
 cwd=<root>
 output=quickfix
 

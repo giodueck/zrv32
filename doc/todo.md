@@ -51,7 +51,7 @@
         - [ ] ANSI escape sequences
     - [x] Help screen
     - [x] Mode indicator (step, running, halted)
-    - [ ] Variable emulator speed
+    - [x] Variable emulator speed
     - [ ] Memory inspector
 
 ## Architecture
