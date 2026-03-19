@@ -457,6 +457,7 @@ pub const Hart = struct {
         if (self.execute_buf.fw_rd != 0) {
             errdefer hprint.deinit();
             const needle = try std.fmt.allocPrint(allocator, "x{d}) ", .{self.execute_buf.fw_rd});
+            defer allocator.free(needle);
             hprint.hi_begin = std.mem.indexOf(u8, buf, needle) orelse unreachable;
             hprint.hi_begin += needle.len;
             hprint.hi_end = hprint.hi_begin + 10;

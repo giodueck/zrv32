@@ -10,7 +10,14 @@ const tui = @import("tui.zig");
 const gui = @import("gui.zig");
 
 pub fn main() !u8 {
-    var allocator = std.heap.page_allocator;
+    var gpa = std.heap.GeneralPurposeAllocator(.{}).init;
+    const allocator = gpa.allocator();
+    defer {
+        switch (gpa.deinit()) {
+            .ok => {},
+            .leak => {std.debug.print("Warning: Detected memory leaks!\n", .{});},
+        }
+    }
 
     var arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
     defer arena.deinit();
