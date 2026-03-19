@@ -193,16 +193,16 @@ pub const Hart = struct {
 
     /// Load a single encoded instruction, flush the pipeline, then step through until every pipeline step
     /// ran the given instruction.
-    pub fn exec(self: *@This(), instr: u32) void {
+    pub fn exec(self: *@This(), instr: u32) !void {
         self.fetch_buf = FetchBuffer{};
         self.decode_buf = DecodeBuffer{};
         self.read_registers_buf = ReadRegistersBuffer{};
         self.execute_buf = ExecuteBuffer{};
 
-        self.bus.set(self.bus.start, instr, .word);
-        self.pc = self.bus.start;
+        try self.bus.set(self.bus.getStart(), instr, .word);
+        self.reset();
 
-        inline for (0..6) |_| {
+        inline for (0..5) |_| {
             self.step();
         }
     }
@@ -215,11 +215,11 @@ pub const Hart = struct {
         self.read_registers_buf = ReadRegistersBuffer{};
         self.execute_buf = ExecuteBuffer{};
 
-        self.loadBootROM(program);
-        self.pc = self.bus.start;
+        self.loadProgram(self.bus.getStart(), program);
+        self.reset();
 
         // Pipeline overhead
-        inline for (0..5) |_| {
+        inline for (0..4) |_| {
             self.step();
         }
 
@@ -599,8 +599,9 @@ pub const Hart = struct {
 
         // Custom halting condition on store to a specific address
         if (buf.exception.? == .HaltAddressWritten or
-        // Memory allocation or other emulator error
-            buf.exception.? == .HardwareError) {
+            // Memory allocation or other emulator error
+            buf.exception.? == .HardwareError)
+        {
             self.fatal_exception = buf.exception.?;
             return;
         }

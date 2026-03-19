@@ -264,52 +264,59 @@ const expect = std.testing.expect;
 const expectEqual = std.testing.expectEqual;
 
 test "setState" {
-    var hart = Hart{};
+    var bus = testBus.TestBus{};
+    try bus.init(std.testing.allocator);
+    defer bus.deinit();
+    var hart = Hart{ .bus = bus.interface() };
 
     hart.setState(.{ .zero = 15, .sp = 1234, .x31 = 31, .pc = 0x8000_0000 });
     hart.registers[1] = 1;
     hart.registers[3] = 3;
-    try expect(hart.checkState(.{ .x0 = 0, .x1 = 1, .x2 = 1234, .x31 = 31, .pc = 2147483648 }));
+    try expect(hart.checkState(.{ .x0 = 0, .x1 = 1, .x2 = 1234, .x3 = 3, .x31 = 31, .pc = 2147483648 }));
 }
 
 test "memory access control fetch" {
-    var hart = Hart{};
-    try hart.init(std.testing.allocator);
-    defer hart.deinit();
+    var bus = testBus.TestBus{};
+    try bus.init(std.testing.allocator);
+    defer bus.deinit();
+    var hart = Hart{ .bus = bus.interface() };
 
-    // Boot ROM
-    hart.loadBootROM(&.{
+    // RAM
+    hart.loadProgram(bus.getStart(), &.{
         0b0010011, // NOP
         2,
         3,
     });
 
-    hart.setState(.{ .pc = 0x1000 });
+    hart.pc = bus.getStart();
+    hart.flush = 3;
     hart.step();
     hart.step();
-    try expect(hart.checkState(.{ .pc = 0x1008, .fetch = 2 }));
+    try expect(hart.checkState(.{ .pc = bus.getStart() + 8, .fetch = 2 }));
 
     // Unmapped memory
     hart.pc = 0;
     hart.step();
     try expectEqual(riscv.ExceptionCause.InstructionAccessFault, hart.fatal_exception.?);
 
-    // RAM
-    hart.bus.set(0x4_0000, 1, 4);
-    hart.pc = 0x4_0000;
+    // I/O memory
+    try hart.bus.set(0x100, 1, .word);
+    hart.pc = 0x100;
     hart.step();
     try expectEqual(riscv.ExceptionCause.InstructionAccessFault, hart.fatal_exception.?);
 }
 
 pub fn checkInstr(initial_state: anytype, comptime instr: []const u8, new_state: anytype) !void {
-    var hart = Hart{};
-    try hart.init(std.testing.allocator);
-    defer hart.deinit();
+    var bus = testBus.TestBus{};
+    try bus.init(std.testing.allocator);
+    defer bus.deinit();
+    var hart = Hart{ .bus = bus.interface() };
+    hart.reset();
 
     hart.setState(initial_state);
 
     const encoded_instr = riscv.assemble(instr);
-    hart.exec(encoded_instr);
+    try hart.exec(encoded_instr);
 
     try std.testing.expect(hart.checkState(new_state));
 }
@@ -351,8 +358,8 @@ test "lui, auipc" {
     // the upper immediate. To construct 0x0bee_ffff, we use (0x0bee_f000 + 0x1000) and 0xfff
     try checkInstr(.{ .s0 = 4095 }, "lui s0, -266496", .{ .s0 = 0xbef00000 });
     try checkInstr(.{ .s0 = 0xbef00000 }, "addi s0, s0, -1", .{ .s0 = 0xbeefffff });
-    try checkInstr(.{ .s0 = 0 }, "auipc s0, 0", .{ .s0 = 4096 }); // boot ROM start
-    try checkInstr(.{ .s0 = 0 }, "auipc s0, 1", .{ .s0 = 8192 }); // boot ROM start + offset
+    try checkInstr(.{ .s0 = 0 }, "auipc s0, 0", .{ .s0 = 0x8000_0000 }); // boot ROM start
+    try checkInstr(.{ .s0 = 0 }, "auipc s0, 1", .{ .s0 = 0x8000_1000 }); // boot ROM start + offset
 }
 
 test "add, sub" {
@@ -390,100 +397,102 @@ test "sll, srl, sra" {
 }
 
 test "jal, j" {
-    // This instruction is loaded at 4096, jumps to itself, and accounting for the 2 subsequent pipeline steps,
-    // pc ends up at 4096 + 8 = 4104
-    try checkInstr(.{ .x1 = 0 }, "j 0", .{ .x1 = 0, .pc = 4104 });
-    try checkInstr(.{ .x1 = 0 }, "jal x1, 0", .{ .x1 = 4100, .pc = 4104 });
+    // This instruction is loaded at 0x8000_0000, jumps to itself, and accounting for the subsequent pipeline step,
+    // pc ends up at 0x8000_0000 + 4 = 0x8000_0008
+    try checkInstr(.{ .x1 = 0 }, "j 0", .{ .x1 = 0, .pc = 0x8000_0004 });
+    try checkInstr(.{ .x1 = 0 }, "jal x1, 0", .{ .x1 = 0x8000_0004, .pc = 0x8000_0004 });
 }
 
 test "jalr, jr, ret" {
-    // Always accounting for the pipeline offset of 8 at the end
-    try checkInstr(.{ .x1 = 4096 }, "jr x1, 16", .{ .x1 = 4096, .pc = 4120 });
-    try checkInstr(.{ .x1 = 4096 }, "jalr x2, x1, 0", .{ .x1 = 4096, .x2 = 4100, .pc = 4104 });
-    try checkInstr(.{ .x1 = 8192 - 8 }, "ret", .{ .x1 = 8192 - 8, .pc = 8192 });
+    // Always accounting for the pipeline offset of 4 at the end
+    try checkInstr(.{ .x1 = 0x8000_0000 }, "jr x1, 16", .{ .x1 = 0x8000_0000, .pc = 0x8000_0014 });
+    try checkInstr(.{ .x1 = 0x8000_0000 }, "jalr x2, x1, 0", .{ .x1 = 0x8000_0000, .x2 = 0x8000_0004, .pc = 0x8000_0004 });
+    try checkInstr(.{ .x1 = 8192 - 4 }, "ret", .{ .x1 = 8192 - 4, .pc = 8192 });
 }
 
 test "beq, bne, blt, bge, bltu, bgeu, bgt, ble, bgtu, bleu" {
-    // Always accounting for the pipeline offset of 8 at the end or 6 total steps with 24
-    try checkInstr(.{ .s0 = 12, .s1 = 12 }, "beq s0, s1, 100", .{ .pc = 4204 });
-    try checkInstr(.{ .s0 = 12, .s1 = 13 }, "beq s0, s1, 100", .{ .pc = 4120 });
-    try checkInstr(.{ .s0 = 12, .s1 = 12 }, "bne s0, s1, 100", .{ .pc = 4120 });
-    try checkInstr(.{ .s0 = 12, .s1 = 13 }, "bne s0, s1, 100", .{ .pc = 4204 });
+    // Always accounting for the pipeline offset of 4 at the end or 5 total steps with 20
+    try checkInstr(.{ .s0 = 12, .s1 = 12 }, "beq s0, s1, 100", .{ .pc = 0x8000_0068 });
+    try checkInstr(.{ .s0 = 12, .s1 = 13 }, "beq s0, s1, 100", .{ .pc = 0x8000_0014 });
+    try checkInstr(.{ .s0 = 12, .s1 = 12 }, "bne s0, s1, 100", .{ .pc = 0x8000_0014 });
+    try checkInstr(.{ .s0 = 12, .s1 = 13 }, "bne s0, s1, 100", .{ .pc = 0x8000_0068 });
 
-    try checkInstr(.{ .s0 = 12, .s1 = 12 }, "blt s0, s1, 100", .{ .pc = 4120 });
-    try checkInstr(.{ .s0 = 12, .s1 = 13 }, "blt s0, s1, 100", .{ .pc = 4204 });
-    try checkInstr(.{ .s0 = 13, .s1 = 12 }, "blt s0, s1, 100", .{ .pc = 4120 });
-    try checkInstr(.{ .s0 = 13, .s1 = @as(u32, @bitCast(@as(i32, -15))) }, "blt s0, s1, 100", .{ .pc = 4120 });
+    try checkInstr(.{ .s0 = 12, .s1 = 12 }, "blt s0, s1, 100", .{ .pc = 0x8000_0014 });
+    try checkInstr(.{ .s0 = 12, .s1 = 13 }, "blt s0, s1, 100", .{ .pc = 0x8000_0068 });
+    try checkInstr(.{ .s0 = 13, .s1 = 12 }, "blt s0, s1, 100", .{ .pc = 0x8000_0014 });
+    try checkInstr(.{ .s0 = 13, .s1 = @as(u32, @bitCast(@as(i32, -15))) }, "blt s0, s1, 100", .{ .pc = 0x8000_0014 });
 
-    try checkInstr(.{ .s0 = 12, .s1 = 12 }, "bge s0, s1, 100", .{ .pc = 4204 });
-    try checkInstr(.{ .s0 = 12, .s1 = 13 }, "bge s0, s1, 100", .{ .pc = 4120 });
-    try checkInstr(.{ .s0 = 13, .s1 = 12 }, "bge s0, s1, 100", .{ .pc = 4204 });
-    try checkInstr(.{ .s0 = 13, .s1 = @as(u32, @bitCast(@as(i32, -15))) }, "bge s0, s1, 100", .{ .pc = 4204 });
+    try checkInstr(.{ .s0 = 12, .s1 = 12 }, "bge s0, s1, 100", .{ .pc = 0x8000_0068 });
+    try checkInstr(.{ .s0 = 12, .s1 = 13 }, "bge s0, s1, 100", .{ .pc = 0x8000_0014 });
+    try checkInstr(.{ .s0 = 13, .s1 = 12 }, "bge s0, s1, 100", .{ .pc = 0x8000_0068 });
+    try checkInstr(.{ .s0 = 13, .s1 = @as(u32, @bitCast(@as(i32, -15))) }, "bge s0, s1, 100", .{ .pc = 0x8000_0068 });
 
-    try checkInstr(.{ .s0 = 12, .s1 = 12 }, "bltu s0, s1, 100", .{ .pc = 4120 });
-    try checkInstr(.{ .s0 = 12, .s1 = 13 }, "bltu s0, s1, 100", .{ .pc = 4204 });
-    try checkInstr(.{ .s0 = 13, .s1 = 12 }, "bltu s0, s1, 100", .{ .pc = 4120 });
-    try checkInstr(.{ .s0 = 13, .s1 = @as(u32, @bitCast(@as(i32, -15))) }, "bltu s0, s1, 100", .{ .pc = 4204 });
+    try checkInstr(.{ .s0 = 12, .s1 = 12 }, "bltu s0, s1, 100", .{ .pc = 0x8000_0014 });
+    try checkInstr(.{ .s0 = 12, .s1 = 13 }, "bltu s0, s1, 100", .{ .pc = 0x8000_0068 });
+    try checkInstr(.{ .s0 = 13, .s1 = 12 }, "bltu s0, s1, 100", .{ .pc = 0x8000_0014 });
+    try checkInstr(.{ .s0 = 13, .s1 = @as(u32, @bitCast(@as(i32, -15))) }, "bltu s0, s1, 100", .{ .pc = 0x8000_0068 });
 
-    try checkInstr(.{ .s0 = 12, .s1 = 12 }, "bgeu s0, s1, 100", .{ .pc = 4204 });
-    try checkInstr(.{ .s0 = 12, .s1 = 13 }, "bgeu s0, s1, 100", .{ .pc = 4120 });
-    try checkInstr(.{ .s0 = 13, .s1 = 12 }, "bgeu s0, s1, 100", .{ .pc = 4204 });
-    try checkInstr(.{ .s0 = 13, .s1 = @as(u32, @bitCast(@as(i32, -15))) }, "bgeu s0, s1, 100", .{ .pc = 4120 });
+    try checkInstr(.{ .s0 = 12, .s1 = 12 }, "bgeu s0, s1, 100", .{ .pc = 0x8000_0068 });
+    try checkInstr(.{ .s0 = 12, .s1 = 13 }, "bgeu s0, s1, 100", .{ .pc = 0x8000_0014 });
+    try checkInstr(.{ .s0 = 13, .s1 = 12 }, "bgeu s0, s1, 100", .{ .pc = 0x8000_0068 });
+    try checkInstr(.{ .s0 = 13, .s1 = @as(u32, @bitCast(@as(i32, -15))) }, "bgeu s0, s1, 100", .{ .pc = 0x8000_0014 });
 
-    try checkInstr(.{ .s0 = 12, .s1 = 12 }, "bgt s0, s1, 100", .{ .pc = 4120 });
-    try checkInstr(.{ .s0 = 12, .s1 = 13 }, "bgt s0, s1, 100", .{ .pc = 4120 });
-    try checkInstr(.{ .s0 = 13, .s1 = 12 }, "bgt s0, s1, 100", .{ .pc = 4204 });
-    try checkInstr(.{ .s0 = 13, .s1 = @as(u32, @bitCast(@as(i32, -15))) }, "bgt s0, s1, 100", .{ .pc = 4204 });
+    try checkInstr(.{ .s0 = 12, .s1 = 12 }, "bgt s0, s1, 100", .{ .pc = 0x8000_0014 });
+    try checkInstr(.{ .s0 = 12, .s1 = 13 }, "bgt s0, s1, 100", .{ .pc = 0x8000_0014 });
+    try checkInstr(.{ .s0 = 13, .s1 = 12 }, "bgt s0, s1, 100", .{ .pc = 0x8000_0068 });
+    try checkInstr(.{ .s0 = 13, .s1 = @as(u32, @bitCast(@as(i32, -15))) }, "bgt s0, s1, 100", .{ .pc = 0x8000_0068 });
 
-    try checkInstr(.{ .s0 = 12, .s1 = 12 }, "ble s0, s1, 100", .{ .pc = 4204 });
-    try checkInstr(.{ .s0 = 12, .s1 = 13 }, "ble s0, s1, 100", .{ .pc = 4204 });
-    try checkInstr(.{ .s0 = 13, .s1 = 12 }, "ble s0, s1, 100", .{ .pc = 4120 });
-    try checkInstr(.{ .s0 = 13, .s1 = @as(u32, @bitCast(@as(i32, -15))) }, "ble s0, s1, 100", .{ .pc = 4120 });
+    try checkInstr(.{ .s0 = 12, .s1 = 12 }, "ble s0, s1, 100", .{ .pc = 0x8000_0068 });
+    try checkInstr(.{ .s0 = 12, .s1 = 13 }, "ble s0, s1, 100", .{ .pc = 0x8000_0068 });
+    try checkInstr(.{ .s0 = 13, .s1 = 12 }, "ble s0, s1, 100", .{ .pc = 0x8000_0014 });
+    try checkInstr(.{ .s0 = 13, .s1 = @as(u32, @bitCast(@as(i32, -15))) }, "ble s0, s1, 100", .{ .pc = 0x8000_0014 });
 
-    try checkInstr(.{ .s0 = 12, .s1 = 12 }, "bgtu s0, s1, 100", .{ .pc = 4120 });
-    try checkInstr(.{ .s0 = 12, .s1 = 13 }, "bgtu s0, s1, 100", .{ .pc = 4120 });
-    try checkInstr(.{ .s0 = 13, .s1 = 12 }, "bgtu s0, s1, 100", .{ .pc = 4204 });
-    try checkInstr(.{ .s0 = 13, .s1 = @as(u32, @bitCast(@as(i32, -15))) }, "bgtu s0, s1, 100", .{ .pc = 4120 });
+    try checkInstr(.{ .s0 = 12, .s1 = 12 }, "bgtu s0, s1, 100", .{ .pc = 0x8000_0014 });
+    try checkInstr(.{ .s0 = 12, .s1 = 13 }, "bgtu s0, s1, 100", .{ .pc = 0x8000_0014 });
+    try checkInstr(.{ .s0 = 13, .s1 = 12 }, "bgtu s0, s1, 100", .{ .pc = 0x8000_0068 });
+    try checkInstr(.{ .s0 = 13, .s1 = @as(u32, @bitCast(@as(i32, -15))) }, "bgtu s0, s1, 100", .{ .pc = 0x8000_0014 });
 
-    try checkInstr(.{ .s0 = 12, .s1 = 12 }, "bleu s0, s1, 100", .{ .pc = 4204 });
-    try checkInstr(.{ .s0 = 12, .s1 = 13 }, "bleu s0, s1, 100", .{ .pc = 4204 });
-    try checkInstr(.{ .s0 = 13, .s1 = 12 }, "bleu s0, s1, 100", .{ .pc = 4120 });
-    try checkInstr(.{ .s0 = 13, .s1 = @as(u32, @bitCast(@as(i32, -15))) }, "bleu s0, s1, 100", .{ .pc = 4204 });
+    try checkInstr(.{ .s0 = 12, .s1 = 12 }, "bleu s0, s1, 100", .{ .pc = 0x8000_0068 });
+    try checkInstr(.{ .s0 = 12, .s1 = 13 }, "bleu s0, s1, 100", .{ .pc = 0x8000_0068 });
+    try checkInstr(.{ .s0 = 13, .s1 = 12 }, "bleu s0, s1, 100", .{ .pc = 0x8000_0014 });
+    try checkInstr(.{ .s0 = 13, .s1 = @as(u32, @bitCast(@as(i32, -15))) }, "bleu s0, s1, 100", .{ .pc = 0x8000_0068 });
 }
 
 test "lw, lh, lb, lhu, lbu" {
-    try checkInstr(.{ .a0 = 4096 }, "lw s0, a0, 0", .{ .s0 = 0x0005_2403 }); // Loads the encoding of itself
+    try checkInstr(.{ .a0 = 0x8000_0000 }, "lw s0, a0, 0", .{ .s0 = 0x0005_2403 }); // Loads the encoding of itself
 
-    try checkInstr(.{ .a0 = 4096 }, "lh s0, a0, 0", .{ .s0 = 0x1403 }); // Loads the encoding of itself
-    try checkInstr(.{ .a0 = 4096 }, "lh s0, a0, 2", .{ .s0 = 0x0025 }); // Loads the encoding of itself
-    try checkInstr(.{ .a0 = 4099 }, "lh s0, a0, -1", .{ .s0 = 0xFFFF_FFF5 }); // Loads the encoding of itself
-    try checkInstr(.{ .a0 = 4099 }, "lhu s0, a0, -1", .{ .s0 = 0xFFF5 }); // Loads the encoding of itself
+    try checkInstr(.{ .a0 = 0x8000_0000 }, "lh s0, a0, 0", .{ .s0 = 0x1403 }); // Loads the encoding of itself
+    try checkInstr(.{ .a0 = 0x8000_0000 }, "lh s0, a0, 2", .{ .s0 = 0x0025 }); // Loads the encoding of itself
+    try checkInstr(.{ .a0 = 0x8000_0003 }, "lh s0, a0, -1", .{ .s0 = 0xFFFF_FFF5 }); // Loads the encoding of itself
+    try checkInstr(.{ .a0 = 0x8000_0003 }, "lhu s0, a0, -1", .{ .s0 = 0xFFF5 }); // Loads the encoding of itself
 
-    try checkInstr(.{ .a0 = 4096 }, "lb s0, a0, 0", .{ .s0 = 0x03 }); // Loads the encoding of itself
-    try checkInstr(.{ .a0 = 4096 }, "lb s0, a0, 1", .{ .s0 = 0x04 }); // Loads the encoding of itself
-    try checkInstr(.{ .a0 = 4096 }, "lb s0, a0, 2", .{ .s0 = 0x25 }); // Loads the encoding of itself
-    try checkInstr(.{ .a0 = 4096 }, "lb s0, a0, 3", .{ .s0 = 0x00 }); // Loads the encoding of itself
-    try checkInstr(.{ .a0 = 4100 }, "lb s0, a0, -1", .{ .s0 = 0xFFFF_FFFF }); // Loads the encoding of itself
-    try checkInstr(.{ .a0 = 4100 }, "lbu s0, a0, -1", .{ .s0 = 0xFF }); // Loads the encoding of itself
+    try checkInstr(.{ .a0 = 0x8000_0000 }, "lb s0, a0, 0", .{ .s0 = 0x03 }); // Loads the encoding of itself
+    try checkInstr(.{ .a0 = 0x8000_0000 }, "lb s0, a0, 1", .{ .s0 = 0x04 }); // Loads the encoding of itself
+    try checkInstr(.{ .a0 = 0x8000_0000 }, "lb s0, a0, 2", .{ .s0 = 0x25 }); // Loads the encoding of itself
+    try checkInstr(.{ .a0 = 0x8000_0000 }, "lb s0, a0, 3", .{ .s0 = 0x00 }); // Loads the encoding of itself
+    try checkInstr(.{ .a0 = 0x8000_0004 }, "lb s0, a0, -1", .{ .s0 = 0xFFFF_FFFF }); // Loads the encoding of itself
+    try checkInstr(.{ .a0 = 0x8000_0004 }, "lbu s0, a0, -1", .{ .s0 = 0xFF }); // Loads the encoding of itself
 }
 
 test "sw, sh, sb" {
     const program = [_]u32{
         riscv.assemble("lui s0, 74565"), // 0x12345
         riscv.assemble("addi s0, s0, 1656"), // 0x678
-        riscv.assemble("lui a0, 64"), // ram start: 256K
+        riscv.assemble("lui a0, -524288"), // ram start: 0x8000_0000
+        riscv.assemble("addi a0, a0, 128"), // plus some offset
         riscv.assemble("sw a0, s0, 0"),
         riscv.assemble("sh a0, s0, 4"),
         riscv.assemble("sb a0, s0, 8"),
     };
 
-    var hart: Hart = .{};
-    try hart.init(std.testing.allocator);
-    defer hart.deinit();
+    var bus = testBus.TestBus{};
+    try bus.init(std.testing.allocator);
+    defer bus.deinit();
+    var hart = Hart{ .bus = bus.interface() };
 
     hart.execMany(&program);
 
-    try expectEqual(0x12345678, hart.bus.get(standardBus.RamStart, 4));
-    try expectEqual(0x5678, hart.bus.get(standardBus.RamStart + 4, 2));
-    try expectEqual(0x78, hart.bus.get(standardBus.RamStart + 8, 1));
+    try expectEqual(0x12345678, hart.bus.get(standardBus.RamStart + 128, .word));
+    try expectEqual(0x5678, hart.bus.get(standardBus.RamStart + 128 + 4, .halfword));
+    try expectEqual(0x78, hart.bus.get(standardBus.RamStart + 128 + 8, .byte));
 }

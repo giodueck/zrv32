@@ -12,7 +12,7 @@ The address to write bytes to is 0x10000. Any store to this location causes the 
 
 For example:
 ```assembly
-    lui x11, %hi(0x10000)
+    la x11, 0x200
     li x10, 0x48 # 'H'
     sw x10, 0(x11)
     li x10, 0x69 # 'i'
