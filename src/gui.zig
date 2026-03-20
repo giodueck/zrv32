@@ -82,6 +82,11 @@ const Keybinds = [_]KeyBindHelp{
         .mods = &.{.Shift},
         .description = "Double the frequency of the emulator when running continuously",
     },
+    .{
+        .screen = .state,
+        .keys = &.{rl.KeyboardKey.f3},
+        .description = "Show FPS counter",
+    },
 
     .{
         .screen = .help,
@@ -167,6 +172,27 @@ pub fn guiMain(allocator: std.mem.Allocator, hart: *Hart) !void {
     var step_indicator: u32 = 0; // For indicating the emulator is running for a few frames if only a step was taken
     const step_indicator_count = 5;
 
+    var show_fps = false;
+
+    // Drawing constants
+    const text_offset = rl.Vector2.init(10, 14);
+    const state_size = rl.Vector2.init(48, 29);
+    const text_output_offset = text_offset.add(state_size.multiply(.{ .x = font_width, .y = 0 })).add(.{ .x = font_width, .y = 0 });
+    const text_output_size = rl.Vector2.init(48, 29);
+    var text_output_box: TextBox = .{
+        .font = font,
+        .rect = rl.Rectangle.init(
+            text_output_offset.x + 1 * font_width,
+            text_output_offset.y + 1 * font_height,
+            font_width * text_output_size.x - 2 * font_width,
+            font_height * text_output_size.y - 1 * font_height,
+        ),
+        .font_size = 16,
+        .spacing = 0,
+        .word_wrap = false,
+        .color = text_color,
+    };
+
     // Main loop
     while (!rl.windowShouldClose()) {
         defer step_indicator -|= 1;
@@ -207,6 +233,9 @@ pub fn guiMain(allocator: std.mem.Allocator, hart: *Hart) !void {
                     } else if (run_steps > 1) {
                         run_steps -= 1;
                     }
+                }
+                if (rl.isKeyPressed(.f3)) {
+                    show_fps = !show_fps;
                 }
 
                 // Switch screens, cancel all previous inputs that advance the emulator
@@ -257,8 +286,23 @@ pub fn guiMain(allocator: std.mem.Allocator, hart: *Hart) !void {
                         state_str = try hart.allocPrintState(allocator);
                         state_cstr = try allocator.dupeZ(u8, state_str);
                     }
-                    allocator.free(text_output_cstr);
-                    text_output_cstr = try allocator.dupeZ(u8, text_output_writer.written());
+
+                    if (text_output_writer.written().len > 0) {
+                        allocator.free(text_output_cstr);
+
+                        text_output_cstr = try allocator.dupeZ(u8, text_output_writer.written());
+
+                        // Clear contents and write back only the portion rendered in the last frame
+                        if (text_output_box.last_scroll_skip_end > 1000) {
+                            text_output_writer.clearRetainingCapacity();
+                            text_output_writer.writer.writeAll(text_output_cstr[@intCast(text_output_box.last_scroll_skip_end)..]) catch unreachable;
+                            text_output_box.last_scroll_skip_end = 0;
+
+                            // Then redupe the C str
+                            allocator.free(text_output_cstr);
+                            text_output_cstr = try allocator.dupeZ(u8, text_output_writer.written());
+                        }
+                    }
                 }
             },
             .help => {
@@ -276,12 +320,11 @@ pub fn guiMain(allocator: std.mem.Allocator, hart: *Hart) !void {
 
         rl.clearBackground(rl.Color.init(20, 20, 50, 255));
 
+        if (show_fps) rl.drawFPS(10, 10);
+
         switch (current_screen) {
             .state => {
-                const text_offset = rl.Vector2.init(10, 14);
-
                 // Draw hart state
-                const state_size = rl.Vector2.init(48, 29);
                 rl.drawRectangleRoundedLines(rl.Rectangle.init(text_offset.x, text_offset.y - 4, font_width * state_size.x, font_height * state_size.y + 4), 0.05, 4, border_color);
 
                 // Hart frequency
@@ -318,25 +361,10 @@ pub fn guiMain(allocator: std.mem.Allocator, hart: *Hart) !void {
                 }
 
                 // Draw text output
-                const text_output_size = rl.Vector2.init(48, 29);
-                const text_output_offset = text_offset.add(state_size.multiply(.{ .x = font_width, .y = 0 })).add(.{ .x = font_width, .y = 0 });
                 rl.drawRectangleRoundedLines(rl.Rectangle.init(text_output_offset.x, text_output_offset.y - 4, font_width * text_output_size.x, font_height * text_output_size.y + 4), 0.05, 4, border_color);
 
                 rl.drawTextEx(font, text_output_title, text_output_offset.add(.{ .x = 2 * font_width, .y = 0 }), 16, 0, title_color);
 
-                const text_output_box: TextBox = .{
-                    .font = font,
-                    .rect = rl.Rectangle.init(
-                        text_output_offset.x + 1 * font_width,
-                        text_output_offset.y + 1 * font_height,
-                        font_width * text_output_size.x - 2 * font_width,
-                        font_height * text_output_size.y - 1 * font_height,
-                    ),
-                    .font_size = 16,
-                    .spacing = 0,
-                    .word_wrap = true,
-                    .color = text_color,
-                };
                 text_output_box.drawText(text_output_cstr);
 
                 // Draw help hint
@@ -346,7 +374,6 @@ pub fn guiMain(allocator: std.mem.Allocator, hart: *Hart) !void {
             },
 
             .help => {
-                const text_offset = rl.Vector2.init(10, 14);
                 const help_size = rl.Vector2.init(97, 29);
                 rl.drawRectangleRoundedLines(rl.Rectangle.init(text_offset.x, text_offset.y - 4, font_width * help_size.x, font_height * help_size.y + 4), 0.035, 4, border_color);
 
@@ -407,10 +434,18 @@ const TextBox = struct {
     color: rl.Color,
     word_wrap: bool,
     tabstop: i32 = 4,
+    /// Follow the bottom of the text
+    bottom: bool = true,
+    /// Last drawText call skipped all characters up to this index
+    last_scroll_skip_end: isize = -1,
 
-    pub fn drawText(self: @This(), text: [:0]u8) void {
+    pub fn drawText(self: *@This(), text: [:0]const u8) void {
         var text_offset: rl.Vector2 = .{ .x = 0, .y = 0 };
         var column: i32 = 0; // For tab expansion
+        self.last_scroll_skip_end = -1;
+
+        var scroll = if (self.bottom) self.textHeight(text) - self.maxLines() else 0;
+        if (scroll < 0) scroll = 0;
 
         const scale_factor = self.font_size / @as(f32, @floatFromInt(self.font.baseSize)); // Character rectangle scaling factor
 
@@ -487,14 +522,14 @@ const TextBox = struct {
                 if (codepoint == '\n') {
                     if (!self.word_wrap) {
                         const bs: f32 = @floatFromInt(self.font.baseSize);
-                        text_offset.y += bs * scale_factor;
+                        if (scroll > 0) scroll -= 1 else text_offset.y += bs * scale_factor;
                         text_offset.x = 0;
                         column = 0;
                     }
                 } else {
                     if (!self.word_wrap and text_offset.x + glyph_width > self.rect.width) {
                         const bs: f32 = @floatFromInt(self.font.baseSize);
-                        text_offset.y += bs * scale_factor;
+                        if (scroll > 0) scroll -= 1 else text_offset.y += bs * scale_factor;
                         text_offset.x = 0;
                         column = 0;
                     }
@@ -503,14 +538,15 @@ const TextBox = struct {
                     if (text_offset.y + @as(f32, @floatFromInt(self.font.baseSize)) * scale_factor > self.rect.height) break;
 
                     // Draw current character glyph
-                    if (codepoint != ' ' and codepoint != '\t') {
+                    if (scroll == 0 and codepoint != ' ' and codepoint != '\t') {
+                        if (self.last_scroll_skip_end < 0) self.last_scroll_skip_end = @intCast(i);
                         rl.drawTextCodepoint(self.font, codepoint, text_offset.add(.{ .x = self.rect.x, .y = self.rect.y }), self.font_size, self.color);
                     }
                 }
 
                 if (self.word_wrap and i == end_line) {
                     const bs: f32 = @floatFromInt(self.font.baseSize);
-                    text_offset.y += bs * scale_factor;
+                    if (scroll > 0) scroll -= 1 else text_offset.y += bs * scale_factor;
                     text_offset.x = 0;
                     column = 0;
                     start_line = end_line;
@@ -526,5 +562,131 @@ const TextBox = struct {
             text_offset.x += glyph_width;
             column += if (glyph_width > 0) (if (codepoint == '\t') tab_width else 1) else 0;
         }
+    }
+
+    /// Returns the number of lines the text would take up in this TextBox, accounting for wrapped lines
+    pub fn textHeight(self: @This(), text: [:0]const u8) i32 {
+        var text_offset: rl.Vector2 = .{ .x = 0, .y = 0 };
+        var column: i32 = 0; // For tab expansion
+        var line: i32 = 0;
+
+        const scale_factor = self.font_size / @as(f32, @floatFromInt(self.font.baseSize)); // Character rectangle scaling factor
+
+        // Index to begin drawing a line
+        var start_line: i32 = -1;
+        // Index to stop drawing a line
+        var end_line: i32 = -1;
+        // Last value of the character position
+        var last_char: i32 = -1;
+
+        // State machine variables
+        const State = enum { measure, draw };
+        var state: State = if (self.word_wrap) .measure else .draw;
+
+        var i: i32 = 0;
+        var k: i32 = 0;
+        while (i < text.len) : ({
+            i += 1;
+            k += 1;
+        }) {
+            var codepoint_byte_count: i32 = 0;
+            const codepoint = rl.getCodepoint(text[@intCast(i)..], &codepoint_byte_count);
+            const index: usize = @intCast(rl.getGlyphIndex(self.font, codepoint));
+
+            if (codepoint == 0x3f) codepoint_byte_count = 1;
+            i += @intCast(codepoint_byte_count - 1);
+
+            var glyph_width: f32 = 0;
+            var tab_width: i32 = 0;
+            if (codepoint != '\n') {
+                glyph_width = if (self.font.glyphs[index].advanceX == 0) self.font.recs[index].width * scale_factor else @as(f32, @floatFromInt(self.font.glyphs[index].advanceX));
+
+                // Expand tabs
+                if (codepoint == '\t') {
+                    tab_width = self.tabstop - @mod(column, self.tabstop);
+                    tab_width = if (tab_width > 0) tab_width else self.tabstop;
+                    const space_index: usize = @intCast(rl.getGlyphIndex(self.font, ' '));
+                    glyph_width = @as(f32, @floatFromInt(tab_width)) * @as(f32, @floatFromInt(self.font.glyphs[space_index].advanceX));
+                }
+
+                if (i + 1 < text.len) glyph_width += self.spacing;
+            }
+
+            if (state == .measure) {
+                // Word delimiters
+                if (codepoint == ' ' or codepoint == '\t' or codepoint == '\n') end_line = @intCast(i);
+
+                if (text_offset.x + glyph_width > self.rect.width) {
+                    end_line = if (end_line < 1) @intCast(i) else end_line;
+                    if (i == end_line) end_line -= codepoint_byte_count;
+                    if (start_line + codepoint_byte_count == end_line) end_line = i - codepoint_byte_count;
+
+                    state = .draw;
+                } else if (i + 1 == text.len) {
+                    end_line = i;
+                    state = .draw;
+                } else if (codepoint == '\n') {
+                    state = .draw;
+                }
+
+                if (state == .draw) {
+                    text_offset.x = 0;
+                    column = 0;
+                    i = start_line;
+                    glyph_width = 0;
+
+                    // Save character position when switching states
+                    const tmp = last_char;
+                    last_char = k - 1;
+                    k = tmp;
+                }
+            } else {
+                // state == .draw
+                // This state is coopted to just count instead of actually drawing anything
+                if (codepoint == '\n') {
+                    if (!self.word_wrap) {
+                        const bs: f32 = @floatFromInt(self.font.baseSize);
+                        text_offset.y += bs * scale_factor;
+                        text_offset.x = 0;
+                        column = 0;
+                        line += 1;
+                    }
+                } else {
+                    if (!self.word_wrap and text_offset.x + glyph_width > self.rect.width) {
+                        const bs: f32 = @floatFromInt(self.font.baseSize);
+                        text_offset.y += bs * scale_factor;
+                        text_offset.x = 0;
+                        column = 0;
+                        line += 1;
+                    }
+                }
+
+                if (self.word_wrap and i == end_line) {
+                    const bs: f32 = @floatFromInt(self.font.baseSize);
+                    text_offset.y += bs * scale_factor;
+                    text_offset.x = 0;
+                    column = 0;
+                    line += 1;
+                    start_line = end_line;
+                    end_line = -1;
+                    glyph_width = 0;
+                    k = last_char;
+
+                    state = if (state == .draw) .measure else .draw;
+                }
+            }
+
+            // No filtering by codepoint or spaces, leading spaces are a feature
+            text_offset.x += glyph_width;
+            column += if (glyph_width > 0) (if (codepoint == '\t') tab_width else 1) else 0;
+        }
+
+        return line + @as(i32, if (text.len > 0) 1 else 0);
+    }
+
+    pub fn maxLines(self: @This()) i32 {
+        const scale_factor = self.font_size / @as(f32, @floatFromInt(self.font.baseSize)); // Character rectangle scaling factor
+
+        return @intFromFloat(self.rect.height / @as(f32, @floatFromInt(self.font.baseSize)) * scale_factor);
     }
 };

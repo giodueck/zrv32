@@ -48,6 +48,7 @@
     - [x] Register view
     - [x] Text output view
         - [x] Wrapping text
+        - [x] Scrolling
         - [ ] ANSI escape sequences
     - [x] Help screen
     - [x] Mode indicator (step, running, halted)
