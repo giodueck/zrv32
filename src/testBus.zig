@@ -235,4 +235,11 @@ pub const TestBus = struct {
     pub fn getStart(self: @This()) u32 {
         return self.start;
     }
+
+    pub fn getSlice(self: *@This(), allocator: std.mem.Allocator, start_addr: u32, len: u32) error{OutOfMemory}![]?u8 {
+        _=self;_=start_addr;_=len;
+        var ret = try allocator.alloc(?u8, 1);
+        ret[0] = 0;
+        return ret;
+    }
 };

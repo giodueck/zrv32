@@ -53,7 +53,8 @@
     - [x] Help screen
     - [x] Mode indicator (step, running, halted)
     - [x] Variable emulator speed
-    - [ ] Memory inspector
+    - [x] Memory inspector
+        - [ ] Address selection controls
 
 ## Architecture
 

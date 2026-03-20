@@ -330,4 +330,84 @@ pub const StandardBus = struct {
     pub fn getStart(self: @This()) u32 {
         return self.start;
     }
+
+    pub fn getSlice(self: *@This(), allocator: std.mem.Allocator, start_addr: u32, len: u32) error{OutOfMemory}![]?u8 {
+        var slice = try allocator.alloc(?u8, len);
+
+        // First access all misaligned addresses, if any, at the start
+        const mastart = start_addr & 3;
+        for (0..mastart) |i| {
+            const addr = start_addr + @as(u32, @intCast(i));
+            inline for (@typeInfo(@TypeOf(MemoryMap)).@"struct".fields) |field| {
+                const range = @field(MemoryMap, field.name);
+
+                if (addr >= range.start and addr < range.start + range.size and range.access.read) {
+                    // Don't want to deal with misaligned and non-word device memory accesses
+                    if (!range.access.io) {
+                        slice[i] = self.getb(addr +% @as(u32, @truncate(i)));
+                    }
+                    break;
+                }
+            }
+            slice[i] = null;
+        }
+
+        // Then access all aligned words in the middle
+        const alignedlen = (len - mastart) & 0xFFFF_FFFC;
+
+        var i: u32 = mastart;
+        while (i < alignedlen) : (i += 4) {
+            const addr = start_addr + mastart + @as(u32, @intCast(i));
+            var val: ?u32 = null;
+            inline_for: inline for (@typeInfo(@TypeOf(MemoryMap)).@"struct".fields) |field| {
+                const range = @field(MemoryMap, field.name);
+
+                if (addr >= range.start and addr < range.start + range.size and range.access.read) {
+                    if (range.access.io) {
+                        for (self.devices.items) |dev| {
+                            for (dev.addresses) |a| {
+                                if (a == addr & 0xFFFF_FFFC) {
+                                    val = dev.load(addr, .word) catch null;
+                                    break :inline_for;
+                                }
+                            }
+                        }
+                    } else {
+                        val = 0;
+                        for (0..4) |j| {
+                            var b: ?u8 = null;
+                            if (addr >= RamStart and addr < RamStart + RamSize) {
+                                b = self.ram.get(@truncate(addr - RamStart + j));
+                            } else if (addr >= BootRomStart and addr < BootRomStart + BootRomSize) {
+                                b = self.boot_rom[addr - BootRomStart + j];
+                            } else {
+                                b = null;
+                            }
+
+                            if (b == null) {
+                                val = null;
+                                break :inline_for;
+                            }
+
+                            val.? |= @as(u32, b.?) << (8 * @as(u5, @truncate(j)));
+                        }
+                        break :inline_for;
+                    }
+                }
+            }
+            if (val) |word| {
+                slice[i] = @truncate(word);
+                slice[i + 1] = @truncate(word >> 8);
+                slice[i + 2] = @truncate(word >> 16);
+                slice[i + 3] = @truncate(word >> 24);
+            } else {
+                slice[i] = null;
+                slice[i + 1] = null;
+                slice[i + 2] = null;
+                slice[i + 3] = null;
+            }
+        }
+
+        return slice;
+    }
 };

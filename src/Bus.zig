@@ -37,6 +37,7 @@ _setCharDevWriter: *const fn (*anyopaque, *std.io.Writer) void,
 _getStart: *const fn (*anyopaque) u32,
 _stepDevices: *const fn (*anyopaque) void,
 _getTimeAddrs: *const fn (*anyopaque) ?[4]u32,
+_getSlice: *const fn (*anyopaque, std.mem.Allocator, u32, u32) error{OutOfMemory}![]?u8,
 
 /// Set the memory at the address to the value, truncated to width bytes.
 /// The maximum width supported is 4, with the minimum being 1.
@@ -100,6 +101,12 @@ pub fn getTimeAddrs(self: Bus) ?[4]u32 {
     return self._getTimeAddrs(self.impl);
 }
 
+/// Returns a slice of values of the memory. No access control is enforced and values of unmapped addresses
+/// are null. The returned slice is owned by the caller.
+pub fn getSlice(self: Bus, allocator: std.mem.Allocator, start_addr: u32, len: u32) error{OutOfMemory}![]?u8 {
+    return try self._getSlice(self.impl, allocator, start_addr, len);
+}
+
 pub fn implBy(impl_obj: anytype) Bus {
     const delegate = Bus.BusDelegate(impl_obj);
     return .{
@@ -113,6 +120,7 @@ pub fn implBy(impl_obj: anytype) Bus {
         ._getStart = delegate.getStart,
         ._stepDevices = delegate.stepDevices,
         ._getTimeAddrs = delegate.getTimeAddrs,
+        ._getSlice = delegate.getSlice,
     };
 }
 
@@ -145,6 +153,9 @@ inline fn BusDelegate(impl_obj: anytype) type {
         }
         pub fn getTimeAddrs(impl: *anyopaque) ?[4]u32 {
             return TPtr(ImplType, impl).getTimeAddrs();
+        }
+        pub fn getSlice(impl: *anyopaque, allocator: std.mem.Allocator, start_addr: u32, len: u32) error{OutOfMemory}![]?u8 {
+            return try TPtr(ImplType, impl).getSlice(allocator, start_addr, len);
         }
     };
 }
