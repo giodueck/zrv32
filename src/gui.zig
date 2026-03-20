@@ -1,3 +1,23 @@
+//! Graphical UI
+//!
+//! The layout focuses on making the emulator transparent and debugging easy.
+//! It does not include a disassembler to show which line in a program is being run,
+//! but it shows the state of the processor and output, and allows for fine-grained
+//! control over execution.
+//!
+//! The advantage to the TUI is the ability to have complete control over the event
+//! loop, which allows us to update the screen at fixed intervals without events
+//! and run the emulator at full speed.
+//!
+//! The layout is:
+//!
+//! ┌──────────────────┐ ┌─────────────┐
+//! │Logical/Real state│ │Character    │
+//! │                  │ │output window│
+//! │                  │ │             │
+//! │                  │ │             │
+//! └──────────────────┘ └─────────────┘
+
 const std = @import("std");
 
 const rl = @import("raylib");

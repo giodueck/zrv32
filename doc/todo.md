@@ -68,3 +68,7 @@
 - [ ] Text input
 - [ ] Color screen
 - [ ] Block device (storage device)
+
+## Performance optimization
+
+- [ ] RAM (hash map accesses)

@@ -1,4 +1,4 @@
-//! TUI layout
+//! Terminal UI
 //!
 //! The layout focuses on making the emulator transparent and debugging easy.
 //! It does not include a disassembler to show which line in a program is being run,
