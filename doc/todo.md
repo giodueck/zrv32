@@ -69,6 +69,8 @@
 - [ ] Color screen
 - [ ] Block device (storage device)
 
-## Performance optimization
+## Performance optimization targets
 
-- [ ] RAM (hash map accesses)
+- [x] RAM (hash map accesses are slow): replaced with a sparse array, which is what was needed anyways.
+- [ ] standardBus.load (13% of the runtime at ~490KHz)
+- [ ] Hart.step (13% of the runtime at ~490KHz)

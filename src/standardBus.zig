@@ -31,6 +31,8 @@
 
 const std = @import("std");
 
+const common = @import("common.zig");
+
 const Bus = @import("Bus.zig");
 const MmioDevice = @import("MmioDevice.zig");
 const MemoryError = Bus.MemoryError;
@@ -89,8 +91,8 @@ const DeviceAddresses = .{
 
 pub const StandardBus = struct {
     boot_rom: []u8 = &.{},
-    /// Hash map of 4K blocks of memory, allocated only when needed
-    ram: std.AutoArrayHashMap(u32, []u8) = undefined,
+    /// Sparse array with pages of 4K bytes, allocated only when needed
+    ram: common.SparseArray(u30, u8, u12) = undefined,
 
     allocator: std.mem.Allocator = undefined,
 
@@ -104,7 +106,7 @@ pub const StandardBus = struct {
     pub fn init(self: *@This(), allocator: std.mem.Allocator) !void {
         self.allocator = allocator;
         self.boot_rom = try self.allocator.alloc(u8, BootRomSize);
-        self.ram = std.AutoArrayHashMap(u32, []u8).init(allocator);
+        self.ram = try common.SparseArray(u30, u8, u12).init(self.allocator);
         self.start = BootRomStart;
 
         self.devices = std.ArrayList(MmioDevice).empty;
@@ -116,10 +118,7 @@ pub const StandardBus = struct {
 
     pub fn deinit(self: *@This()) void {
         self.devices.deinit(self.allocator);
-        for (self.ram.values()) |block| {
-            self.allocator.free(block);
-        }
-        self.ram.deinit();
+        self.ram.deinit(self.allocator);
         self.allocator.free(self.boot_rom);
     }
 
@@ -146,18 +145,9 @@ pub const StandardBus = struct {
     /// If allocation fails, returns a MemoryError.HardwareError, which should halt the emulator
     fn setbRam(self: *@This(), addr: u32, byte: u8) MemoryError!void {
         const address = addr - RamStart;
-        if (self.ram.get(address >> 12)) |block| {
-            block[address & ((1 << 12) - 1)] = byte;
-        } else {
-            var block = self.allocator.alloc(u8, 1 << 12) catch {
-                return MemoryError.HardwareError;
-            };
-            block[address & ((1 << 12) - 1)] = byte;
-            self.ram.put(address >> 12, block) catch {
-                self.allocator.free(block);
-                return MemoryError.HardwareError;
-            };
-        }
+        self.ram.set(self.allocator, @truncate(address), byte) catch {
+            return MemoryError.HardwareError;
+        };
     }
 
     /// Set a single byte.
@@ -227,9 +217,11 @@ pub const StandardBus = struct {
             if (addr >= range.start and addr < range.start + range.size and range.access.write) {
                 if (range.access.io) {
                     for (self.devices.items) |dev| {
-                        if (std.mem.indexOfScalar(u32, dev.addresses, addr & 0xFFFF_FFFC)) |_| {
-                            try dev.store(addr, value, width);
-                            return;
+                        for (dev.addresses) |a| {
+                            if (a == addr & 0xFFFF_FFFC) {
+                                try dev.store(addr, value, width);
+                                return;
+                            }
                         }
                     }
                 } else {
@@ -244,14 +236,10 @@ pub const StandardBus = struct {
     }
 
     /// Get a byte from RAM. If the 4K block the address falls into is already allocated, returns the byte at
-    /// that address. If not, returns the normal Zig undefined value: 0xAA.
+    /// that address. If not, returns 0.
     fn getbRam(self: *@This(), addr: u32) u8 {
         const address = addr - RamStart;
-        if (self.ram.get(address >> 12)) |block| {
-            return block[address & ((1 << 12) - 1)];
-        } else {
-            return 0xAA;
-        }
+        return self.ram.get(@truncate(address)) orelse 0;
     }
 
     /// Get a single byte.
@@ -303,8 +291,10 @@ pub const StandardBus = struct {
             if (addr >= range.start and addr < range.start + range.size and range.access.read) {
                 if (range.access.io) {
                     for (self.devices.items) |dev| {
-                        if (std.mem.indexOfScalar(u32, dev.addresses, addr & 0xFFFF_FFFC)) |_| {
-                            return dev.load(addr, width);
+                        for (dev.addresses) |a| {
+                            if (a == addr & 0xFFFF_FFFC) {
+                                return dev.load(addr, width);
+                            }
                         }
                     }
                 } else {
