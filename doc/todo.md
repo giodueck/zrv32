@@ -54,7 +54,8 @@
     - [x] Mode indicator (step, running, halted)
     - [x] Variable emulator speed
     - [x] Memory inspector
-        - [ ] Address selection controls
+        - [x] Address selection controls
+    - [ ] Switch to Raygui
 
 ## Architecture
 
