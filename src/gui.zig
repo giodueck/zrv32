@@ -37,6 +37,7 @@ const charset = a: {
 
 const Screen = enum(u32) {
     state,
+    memory,
     help,
 };
 
@@ -58,6 +59,11 @@ const Keybinds = [_]KeyBindHelp{
         .screen = .state,
         .keys = &.{rl.KeyboardKey.h},
         .description = "Show this help screen",
+    },
+    .{
+        .screen = .state,
+        .keys = &.{rl.KeyboardKey.m},
+        .description = "Switch to memory view settings",
     },
     .{
         .screen = .state,
@@ -109,9 +115,15 @@ const Keybinds = [_]KeyBindHelp{
     },
 
     .{
+        .screen = .memory,
+        .keys = &.{ rl.KeyboardKey.m, rl.KeyboardKey.escape },
+        .description = "Return to the emulator",
+    },
+
+    .{
         .screen = .help,
         .keys = &.{ rl.KeyboardKey.h, rl.KeyboardKey.escape },
-        .description = "Hide this help screen",
+        .description = "Return to the emulator",
     },
 };
 
@@ -138,6 +150,8 @@ pub fn guiMain(allocator: std.mem.Allocator, hart: *Hart) !void {
     const logical_state_view_title = "Logical Hart State";
     const text_output_view_title = "Output";
     const memory_view_title = "Memory";
+    const memory_settings_view_title = "Memory settings";
+    const help_view_title = "Keybind help";
 
     // Real hart state
     var state_str = try hart.allocPrintState(allocator);
@@ -168,6 +182,13 @@ pub fn guiMain(allocator: std.mem.Allocator, hart: *Hart) !void {
     const memory_view_buffer = try allocator.allocSentinel(u8, 2048, 0);
     defer allocator.free(memory_view_buffer);
     var memory_view_cstr: [:0]u8 = undefined; // must be defined in the first loop iteration
+
+    // Memory settings view text input buffer
+    var memory_settings_input_writer = std.io.Writer.Allocating.init(allocator);
+    defer memory_settings_input_writer.deinit();
+    hart.bus.setCharDevWriter(&memory_settings_input_writer.writer);
+    const memory_settings_input_cstr = try allocator.dupeZ(u8, memory_settings_input_writer.written());
+    defer allocator.free(memory_settings_input_cstr);
 
     // General purpose text buffer
     const gp_buffer = try allocator.allocSentinel(u8, 1024, 0);
@@ -205,7 +226,7 @@ pub fn guiMain(allocator: std.mem.Allocator, hart: *Hart) !void {
     // State window will take up a fixed size
     const state_view_size_chars = rl.Vector2.init(48, 29); // in characters
     // Memory dump output will take up a variable width
-    const memory_view_size_chars = rl.Vector2.init(16 * 3 + 2 + 2, 9); // in characters
+    const memory_view_size_chars = rl.Vector2.init(16 * 3 + 2, 9); // in characters
     // Text output will take up a variable width and height
     const text_output_view_offset = view_offset.add(state_view_size_chars.multiply(.{ .x = font_width, .y = 0 })).add(.{ .x = font_width, .y = 0 });
     const text_output_view_size_chars = rl.Vector2.init(@round((screenWidth - view_offset.x - ((state_view_size_chars.x + 1) * font_width)) / font_width - 1), state_view_size_chars.y - memory_view_size_chars.y - 1); // in characters
@@ -237,6 +258,24 @@ pub fn guiMain(allocator: std.mem.Allocator, hart: *Hart) !void {
         .word_wrap = false,
         .color = text_color,
     };
+    // Memory screen view
+    const memory_settings_view_size_chars = rl.Vector2.init(screenWidth / font_width - 2, state_view_size_chars.y);
+    // const memory_settings_input_size_chars = rl.Vector2.init(10, 1); // in characters
+    // var memory_settings_input_textbox: TextBox = .{
+    //     .font = font,
+    //     .rect = rl.Rectangle.init(
+    //         view_offset.x * 2 + 1 * font_width,
+    //         view_offset.y * 2 + 1 * font_height,
+    //         font_width * memory_settings_view_size_chars.x - 2 * font_width,
+    //         font_height * memory_settings_view_size_chars.y - 1 * font_height,
+    //     ),
+    //     .font_size = 16,
+    //     .spacing = 0,
+    //     .word_wrap = false,
+    //     .color = text_color,
+    // };
+    // Help screen view
+    const help_view_size_chars = rl.Vector2.init(screenWidth / font_width - 2, state_view_size_chars.y);
 
     // Main loop
     var update_outputs = true;
@@ -282,26 +321,15 @@ pub fn guiMain(allocator: std.mem.Allocator, hart: *Hart) !void {
                 if (rl.isKeyPressed(.f3)) {
                     show_fps = !show_fps;
                 }
-                if (rl.isKeyPressed(.m)) {
-                    var mem = try hart.bus.getSlice(allocator, hart.bus.getStart(), 0x80);
-                    defer allocator.free(mem);
-                    var mem_cstr = try bufPrintMemoryDump(gp_buffer, mem);
-                    std.debug.print("{s}\n", .{mem_cstr});
-
-                    allocator.free(mem);
-                    mem = try hart.bus.getSlice(allocator, 0xbfffff80, 0x80);
-                    mem_cstr = try bufPrintMemoryDump(gp_buffer, mem);
-                    std.debug.print("{s}\n", .{mem_cstr});
-
-                    allocator.free(mem);
-                    mem = try hart.bus.getSlice(allocator, 0x100, 0x110);
-                    mem_cstr = try bufPrintMemoryDump(gp_buffer, mem);
-                    std.debug.print("{s}\n", .{mem_cstr});
-
-                    std.debug.print("\n", .{});
-                }
 
                 // Switch screens, cancel all previous inputs that advance the emulator
+                if (rl.isKeyPressed(.m)) {
+                    current_screen = .memory;
+                    step = false;
+                    reset = false;
+                    run = false;
+                    memory_settings_input_writer.clearRetainingCapacity();
+                }
                 if (rl.isKeyPressed(.h)) {
                     current_screen = .help;
                     step = false;
@@ -373,6 +401,30 @@ pub fn guiMain(allocator: std.mem.Allocator, hart: *Hart) !void {
                     memory_view_cstr = try bufPrintMemoryDump(memory_view_buffer, mem);
                 }
             },
+            .memory => {
+                if (rl.isKeyPressed(.m) or rl.isKeyPressed(.escape)) {
+                    current_screen = .state;
+                }
+                if (rl.isKeyPressed(.h)) {
+                    current_screen = .help;
+                }
+
+                var k = rl.getKeyPressed();
+                while (k != .null and memory_settings_input_writer.written().len < 8) : (k = rl.getKeyPressed()) {
+                    switch (k) {
+                        .zero, .one, .two, .three, .four, .five, .six, .seven, .eight, .nine => {
+                            try memory_settings_input_writer.writer.writeByte(@as(u8, @intCast(@intFromEnum(k))) - '0');
+                        },
+                        .a, .b, .c, .d, .e, .f => {
+                            try memory_settings_input_writer.writer.writeByte(@as(u8, @intCast(@intFromEnum(k))) - 'a' + 10);
+                        },
+                        .backspace => {
+                            memory_settings_input_writer.writer.undo(1);
+                        },
+                        else => {}
+                    }
+                }
+            },
             .help => {
                 if (rl.isKeyPressed(.h) or rl.isKeyPressed(.escape)) {
                     current_screen = .state;
@@ -441,23 +493,30 @@ pub fn guiMain(allocator: std.mem.Allocator, hart: *Hart) !void {
                 rl.drawTextEx(font, memory_view_title, memory_view_offset.add(.{ .x = 2 * font_width, .y = 0 }), 16, 0, title_color);
 
                 memory_view_textbox.drawText(memory_view_cstr);
+            },
 
-                // Draw help hint
-                rl.drawTextEx(font, "Press ", view_offset.add(state_view_size_chars.multiply(.{ .x = 0, .y = font_height })).add(.{ .x = 0, .y = font_height }), 16, 0, secondary_text_color);
-                rl.drawTextEx(font, "h", view_offset.add(state_view_size_chars.multiply(.{ .x = 0, .y = font_height })).add(.{ .x = font_width * 6, .y = font_height }), 16, 0, keybind_color);
-                rl.drawTextEx(font, " for help", view_offset.add(state_view_size_chars.multiply(.{ .x = 0, .y = font_height })).add(.{ .x = font_width * 7, .y = font_height }), 16, 0, secondary_text_color);
+            .memory => {
+                rl.drawRectangleRoundedLines(rl.Rectangle.init(view_offset.x, view_offset.y - 4, font_width * memory_settings_view_size_chars.x, font_height * memory_settings_view_size_chars.y + 4), 0.035, 4, border_color);
+
+                rl.drawTextEx(font, memory_settings_view_title, view_offset.add(.{ .x = 2 * font_width, .y = 0 }), 16, 0, title_color);
+
+                rl.drawRectangleRoundedLines(rl.Rectangle.init(view_offset.x*2, view_offset.y*2 - @divTrunc(font_height, 2), font_width * memory_settings_view_size_chars.x, font_height * memory_settings_view_size_chars.y + @divTrunc(font_height, 2)), 0.1, 4, border_color);
             },
 
             .help => {
-                const help_size = rl.Vector2.init(97, 29);
-                rl.drawRectangleRoundedLines(rl.Rectangle.init(view_offset.x, view_offset.y - 4, font_width * help_size.x, font_height * help_size.y + 4), 0.035, 4, border_color);
+                rl.drawRectangleRoundedLines(rl.Rectangle.init(view_offset.x, view_offset.y - 4, font_width * help_view_size_chars.x, font_height * help_view_size_chars.y + 4), 0.035, 4, border_color);
 
-                rl.drawTextEx(font, "Keybind help", view_offset.add(.{ .x = 2 * font_width, .y = 0 }), 16, 0, title_color);
+                rl.drawTextEx(font, help_view_title, view_offset.add(.{ .x = 2 * font_width, .y = 0 }), 16, 0, title_color);
 
                 // Show all keybinds for each screen
                 var line: i32 = 1;
                 inline for (@typeInfo(Screen).@"enum".fields) |s| {
-                    rl.drawTextEx(font, comptime if (s.value == @intFromEnum(Screen.state)) "Emulator" else if (s.value == @intFromEnum(Screen.help)) "Keybind help", view_offset.add(.{ .x = font_width, .y = @floatFromInt(line * font_height) }), 16, 0, title_color);
+                    const section_title = comptime switch (@as(Screen, @enumFromInt(s.value))) {
+                        .state => "Emulator",
+                        .memory => "Memory settings",
+                        .help => "Keybind help",
+                    };
+                    rl.drawTextEx(font, section_title, view_offset.add(.{ .x = font_width, .y = @floatFromInt(line * font_height) }), 16, 0, title_color);
                     line += 1;
 
                     for (Keybinds) |bind| {
@@ -488,6 +547,11 @@ pub fn guiMain(allocator: std.mem.Allocator, hart: *Hart) !void {
                 }
             },
         }
+
+        // Draw help hint
+        rl.drawTextEx(font, "Press ", view_offset.add(state_view_size_chars.multiply(.{ .x = 0, .y = font_height })).add(.{ .x = 0, .y = font_height }), 16, 0, secondary_text_color);
+        rl.drawTextEx(font, "h", view_offset.add(state_view_size_chars.multiply(.{ .x = 0, .y = font_height })).add(.{ .x = font_width * 6, .y = font_height }), 16, 0, keybind_color);
+        rl.drawTextEx(font, " for help", view_offset.add(state_view_size_chars.multiply(.{ .x = 0, .y = font_height })).add(.{ .x = font_width * 7, .y = font_height }), 16, 0, secondary_text_color);
         //----------------------------------------------------------------------------------
     }
 }
@@ -496,6 +560,7 @@ pub fn guiMain(allocator: std.mem.Allocator, hart: *Hart) !void {
 fn getKeyName(key: rl.KeyboardKey) [:0]const u8 {
     return switch (key) {
         .escape => return "Escape",
+        .f3 => return "F3",
         else => rl.getKeyName(key),
     };
 }
