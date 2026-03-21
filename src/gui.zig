@@ -182,12 +182,13 @@ pub fn guiMain(allocator: std.mem.Allocator, hart: *Hart) !void {
     const memory_view_buffer = try allocator.allocSentinel(u8, 2048, 0);
     defer allocator.free(memory_view_buffer);
     var memory_view_cstr: [:0]u8 = undefined; // must be defined in the first loop iteration
+    var memory_view_address: u32 = hart.bus.getStart();
 
     // Memory settings view text input buffer
     var memory_settings_input_writer = std.io.Writer.Allocating.init(allocator);
+    try memory_settings_input_writer.writer.writeAll("0x");
     defer memory_settings_input_writer.deinit();
-    hart.bus.setCharDevWriter(&memory_settings_input_writer.writer);
-    const memory_settings_input_cstr = try allocator.dupeZ(u8, memory_settings_input_writer.written());
+    var memory_settings_input_cstr = try allocator.dupeZ(u8, memory_settings_input_writer.written());
     defer allocator.free(memory_settings_input_cstr);
 
     // General purpose text buffer
@@ -260,20 +261,21 @@ pub fn guiMain(allocator: std.mem.Allocator, hart: *Hart) !void {
     };
     // Memory screen view
     const memory_settings_view_size_chars = rl.Vector2.init(screenWidth / font_width - 2, state_view_size_chars.y);
-    // const memory_settings_input_size_chars = rl.Vector2.init(10, 1); // in characters
-    // var memory_settings_input_textbox: TextBox = .{
-    //     .font = font,
-    //     .rect = rl.Rectangle.init(
-    //         view_offset.x * 2 + 1 * font_width,
-    //         view_offset.y * 2 + 1 * font_height,
-    //         font_width * memory_settings_view_size_chars.x - 2 * font_width,
-    //         font_height * memory_settings_view_size_chars.y - 1 * font_height,
-    //     ),
-    //     .font_size = 16,
-    //     .spacing = 0,
-    //     .word_wrap = false,
-    //     .color = text_color,
-    // };
+    const memory_settings_input_size_chars = rl.Vector2.init(10, 1); // in characters
+    var memory_settings_input_textbox: TextBox = .{
+        .font = font,
+        .rect = rl.Rectangle.init(
+            view_offset.x * 2 + 1 * font_width,
+            view_offset.y * 2 + 1 * font_height,
+            font_width * memory_settings_input_size_chars.x,
+            font_height * memory_settings_input_size_chars.y,
+        ),
+        .font_size = 16,
+        .spacing = 0,
+        .word_wrap = false,
+        .color = text_color,
+    };
+    std.debug.print("maxlines = {d}\n", .{memory_settings_input_textbox.maxLines()});
     // Help screen view
     const help_view_size_chars = rl.Vector2.init(screenWidth / font_width - 2, state_view_size_chars.y);
 
@@ -328,7 +330,6 @@ pub fn guiMain(allocator: std.mem.Allocator, hart: *Hart) !void {
                     step = false;
                     reset = false;
                     run = false;
-                    memory_settings_input_writer.clearRetainingCapacity();
                 }
                 if (rl.isKeyPressed(.h)) {
                     current_screen = .help;
@@ -396,7 +397,7 @@ pub fn guiMain(allocator: std.mem.Allocator, hart: *Hart) !void {
                         }
                     }
 
-                    const mem = try hart.bus.getSlice(allocator, hart.bus.getStart(), 0x80);
+                    const mem = try hart.bus.getSlice(allocator, memory_view_address, 0x80);
                     defer allocator.free(mem);
                     memory_view_cstr = try bufPrintMemoryDump(memory_view_buffer, mem);
                 }
@@ -408,22 +409,31 @@ pub fn guiMain(allocator: std.mem.Allocator, hart: *Hart) !void {
                 if (rl.isKeyPressed(.h)) {
                     current_screen = .help;
                 }
+                if (rl.isKeyPressed(.enter)) {
+                    memory_view_address = try std.fmt.parseInt(u32, memory_settings_input_writer.written(), 0);
+                    update_outputs = true;
+                    current_screen = .state;
+                    continue;
+                }
 
                 var k = rl.getKeyPressed();
-                while (k != .null and memory_settings_input_writer.written().len < 8) : (k = rl.getKeyPressed()) {
+                while (k != .null) : (k = rl.getKeyPressed()) {
                     switch (k) {
                         .zero, .one, .two, .three, .four, .five, .six, .seven, .eight, .nine => {
-                            try memory_settings_input_writer.writer.writeByte(@as(u8, @intCast(@intFromEnum(k))) - '0');
+                            if (memory_settings_input_writer.written().len < 10) try memory_settings_input_writer.writer.writeByte(@as(u8, @intCast(@intFromEnum(k))));
                         },
                         .a, .b, .c, .d, .e, .f => {
-                            try memory_settings_input_writer.writer.writeByte(@as(u8, @intCast(@intFromEnum(k))) - 'a' + 10);
+                            if (memory_settings_input_writer.written().len < 10) try memory_settings_input_writer.writer.writeByte(@as(u8, @intCast(@intFromEnum(k))));
                         },
                         .backspace => {
-                            memory_settings_input_writer.writer.undo(1);
+                            if (memory_settings_input_writer.written().len > 2) memory_settings_input_writer.writer.undo(1);
+                            if (rl.isKeyDown(.left_control) or rl.isKeyDown(.right_control)) memory_settings_input_writer.writer.end = 2;
                         },
-                        else => {}
+                        else => {},
                     }
                 }
+                allocator.free(memory_settings_input_cstr);
+                memory_settings_input_cstr = try allocator.dupeZ(u8, memory_settings_input_writer.written());
             },
             .help => {
                 if (rl.isKeyPressed(.h) or rl.isKeyPressed(.escape)) {
@@ -500,7 +510,9 @@ pub fn guiMain(allocator: std.mem.Allocator, hart: *Hart) !void {
 
                 rl.drawTextEx(font, memory_settings_view_title, view_offset.add(.{ .x = 2 * font_width, .y = 0 }), 16, 0, title_color);
 
-                rl.drawRectangleRoundedLines(rl.Rectangle.init(view_offset.x*2, view_offset.y*2 - @divTrunc(font_height, 2), font_width * memory_settings_view_size_chars.x, font_height * memory_settings_view_size_chars.y + @divTrunc(font_height, 2)), 0.1, 4, border_color);
+                rl.drawRectangleRoundedLines(rl.Rectangle.init(memory_settings_input_textbox.rect.x - @divTrunc(font_width, 2), memory_settings_input_textbox.rect.y - @divTrunc(font_height, 3), memory_settings_input_textbox.rect.width + font_width, memory_settings_input_textbox.rect.height + @divTrunc(font_height, 2)), 0.1, 4, border_color);
+
+                memory_settings_input_textbox.drawText(memory_settings_input_cstr);
             },
 
             .help => {
