@@ -13,6 +13,8 @@ pub fn build(b: *std.Build) void {
         }),
     });
 
+    exe.root_module.addIncludePath(b.path("."));
+
     // Dependencies
     const clap = b.dependency("clap", .{
         .target = target,

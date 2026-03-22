@@ -194,6 +194,7 @@ pub fn main() !u8 {
     if (boot_fd) |fd| {
         if (do_test) {
             const buf = try allocator.alloc(u8, testBus.TestRamSize);
+            @memset(buf, 0);
             defer allocator.free(buf);
             var reader = fd.reader(buf);
             if (try reader.getSize() > testBus.TestRamSize) {
@@ -206,6 +207,7 @@ pub fn main() !u8 {
             hart.loadProgramBytes(testBus.TestRamStart, buf);
         } else {
             const buf = try allocator.alloc(u8, standardBus.BootRomSize);
+            @memset(buf, 0);
             defer allocator.free(buf);
             var reader = fd.reader(buf);
             if (try reader.getSize() > standardBus.BootRomSize) {

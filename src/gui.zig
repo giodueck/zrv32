@@ -14,13 +14,17 @@
 //! ┌──────────────────┐ ┌─────────────┐
 //! │Logical/Real state│ │Character    │
 //! │                  │ │output window│
-//! │                  │ │             │
-//! │                  │ │             │
+//! │                  │ └─────────────┘
+//! │                  │ ┌─────────────┐
+//! │                  │ │Memory view  │
 //! └──────────────────┘ └─────────────┘
 
 const std = @import("std");
 
 const rl = @import("raylib");
+const rg = @import("raygui");
+
+const genesis = @import("resources/style_genesis.zig");
 
 const Hart = @import("hart.zig").Hart;
 const riscv = @import("riscv.zig");
@@ -117,13 +121,13 @@ const Keybinds = [_]KeyBindHelp{
     .{
         .screen = .memory,
         .keys = &.{ rl.KeyboardKey.m, rl.KeyboardKey.escape },
-        .description = "Return to the emulator",
+        .description = "Return to previous screen",
     },
 
     .{
         .screen = .help,
         .keys = &.{ rl.KeyboardKey.h, rl.KeyboardKey.escape },
-        .description = "Return to the emulator",
+        .description = "Return to previous screen",
     },
 };
 
@@ -136,13 +140,14 @@ pub fn guiMain(allocator: std.mem.Allocator, hart: *Hart) !void {
     rl.initWindow(screenWidth, screenHeight, "zrv32");
     defer rl.closeWindow(); // Close window and OpenGL context
 
+    genesis.GuiLoadStyleGenesis();
+
     // Colors used in drawing
-    const title_color: rl.Color = .blue;
-    const text_color: rl.Color = .light_gray;
-    const secondary_text_color: rl.Color = .gray;
-    const highlight_color: rl.Color = .dark_blue;
-    const border_color: rl.Color = .sky_blue;
-    const keybind_color: rl.Color = .purple;
+    const bg_color: rl.Color = colorFromInt(rg.getStyle(.default, .{ .default = .background_color }));
+    const title_color: rl.Color = colorFromInt(rg.getStyle(.default, .{ .control = .text_color_pressed }));
+    const text_color: rl.Color = colorFromInt(rg.getStyle(.default, .{ .control = .text_color_normal }));
+    const highlight_color: rl.Color = colorFromInt(rg.getStyle(.default, .{ .control = .base_color_pressed }));
+    const keybind_color: rl.Color = colorFromInt(rg.getStyle(.default, .{ .control = .base_color_pressed }));
     const semaphore_colors: [3]rl.Color = [_]rl.Color{ .red, .yellow, .green };
 
     // Section titles
@@ -161,15 +166,11 @@ pub fn guiMain(allocator: std.mem.Allocator, hart: *Hart) !void {
 
     // Logical hart state
     var logical_state_str = try hart.allocPrintLogicalState(allocator);
-    var logical_state_cstr: [:0]u8 = try allocator.dupeZ(u8, logical_state_str.slice);
     defer logical_state_str.deinit();
-    defer allocator.free(logical_state_cstr);
 
     // Standalone CSR and priv state, which is not appended to the logical state
     var csr_state_str = try hart.allocPrintCSRs(allocator);
-    var csr_state_cstr: [:0]u8 = try allocator.dupeZ(u8, csr_state_str);
     defer allocator.free(csr_state_str);
-    defer allocator.free(csr_state_cstr);
 
     // Text output writer
     var text_output_writer = std.io.Writer.Allocating.init(allocator);
@@ -188,11 +189,13 @@ pub fn guiMain(allocator: std.mem.Allocator, hart: *Hart) !void {
     var memory_settings_input_writer = std.io.Writer.Allocating.init(allocator);
     try memory_settings_input_writer.writer.writeAll("0x");
     defer memory_settings_input_writer.deinit();
-    var memory_settings_input_cstr = try allocator.dupeZ(u8, memory_settings_input_writer.written());
-    defer allocator.free(memory_settings_input_cstr);
+
+    const input_buffer = try allocator.allocSentinel(u8, 2048, 0);
+    @memset(input_buffer, 0);
+    defer allocator.free(input_buffer);
 
     // General purpose text buffer
-    const gp_buffer = try allocator.allocSentinel(u8, 1024, 0);
+    const gp_buffer = try allocator.allocSentinel(u8, 2048, 0);
     defer allocator.free(gp_buffer);
 
     // Use a monospaced font instead of the default
@@ -200,6 +203,8 @@ pub fn guiMain(allocator: std.mem.Allocator, hart: *Hart) !void {
     defer rl.unloadFont(font);
     const font_height = 18;
     const font_width = 8;
+
+    rg.setFont(font);
 
     const title_font = try rl.loadFontFromMemory(".ttf", hack_ttf, 20, &charset);
     defer rl.unloadFont(title_font);
@@ -210,7 +215,11 @@ pub fn guiMain(allocator: std.mem.Allocator, hart: *Hart) !void {
     //--------------------------------------------------------------------------------------
 
     // Main loop variables
-    var current_screen: Screen = .state;
+    var screen_stack = try std.ArrayList(Screen).initCapacity(allocator, 16);
+    defer screen_stack.deinit(allocator);
+    screen_stack.appendAssumeCapacity(.state);
+
+    var show_fps = false;
 
     // State screen variables
     var show_logical_state = true;
@@ -220,17 +229,18 @@ pub fn guiMain(allocator: std.mem.Allocator, hart: *Hart) !void {
     var step_indicator: u32 = 0; // For indicating the emulator is running for a few frames if only a step was taken
     const step_indicator_count = 5;
 
-    var show_fps = false;
+    // Memory settings screen variables
+    var invalid_character: ?u8 = null;
 
     // Drawing constants
-    const view_offset = rl.Vector2.init(font_width, font_height); // in pixels
+    const view_offset = rl.Vector2.init(24, 24); // in pixels
     // State window will take up a fixed size
     const state_view_size_chars = rl.Vector2.init(48, 29); // in characters
     // Memory dump output will take up a variable width
     const memory_view_size_chars = rl.Vector2.init(16 * 3 + 2, 9); // in characters
     // Text output will take up a variable width and height
-    const text_output_view_offset = view_offset.add(state_view_size_chars.multiply(.{ .x = font_width, .y = 0 })).add(.{ .x = font_width, .y = 0 });
-    const text_output_view_size_chars = rl.Vector2.init(@round((screenWidth - view_offset.x - ((state_view_size_chars.x + 1) * font_width)) / font_width - 1), state_view_size_chars.y - memory_view_size_chars.y - 1); // in characters
+    const text_output_view_offset = view_offset.add(state_view_size_chars.multiply(.{ .x = font_width, .y = 0 })).add(.{ .x = view_offset.x, .y = 0 });
+    const text_output_view_size_chars = rl.Vector2.init(@round((screenWidth - view_offset.x * 3 - (state_view_size_chars.x * font_width)) / font_width), state_view_size_chars.y - memory_view_size_chars.y - view_offset.y / font_height); // in characters
     var text_output_view_textbox: TextBox = .{
         .font = font,
         .rect = rl.Rectangle.init(
@@ -260,29 +270,17 @@ pub fn guiMain(allocator: std.mem.Allocator, hart: *Hart) !void {
         .color = text_color,
     };
     // Memory screen view
-    const memory_settings_view_size_chars = rl.Vector2.init(screenWidth / font_width - 2, state_view_size_chars.y);
+    const memory_settings_view_size_chars = rl.Vector2.init(@round((screenWidth - view_offset.x * 2) / font_width), state_view_size_chars.y - view_offset.y / font_height); // in characters
     const memory_settings_input_size_chars = rl.Vector2.init(10, 1); // in characters
-    var memory_settings_input_textbox: TextBox = .{
-        .font = font,
-        .rect = rl.Rectangle.init(
-            view_offset.x * 2 + 1 * font_width,
-            view_offset.y * 2 + 1 * font_height,
-            font_width * memory_settings_input_size_chars.x,
-            font_height * memory_settings_input_size_chars.y,
-        ),
-        .font_size = 16,
-        .spacing = 0,
-        .word_wrap = false,
-        .color = text_color,
-    };
-    std.debug.print("maxlines = {d}\n", .{memory_settings_input_textbox.maxLines()});
     // Help screen view
-    const help_view_size_chars = rl.Vector2.init(screenWidth / font_width - 2, state_view_size_chars.y);
+    const help_view_size_chars = rl.Vector2.init(@round((screenWidth - view_offset.x * 2) / font_width), state_view_size_chars.y - view_offset.y / font_height); // in characters
 
     // Main loop
     var update_outputs = true;
     while (!rl.windowShouldClose()) {
         defer step_indicator -|= 1;
+
+        const current_screen = screen_stack.getLast();
 
         // Update
         //----------------------------------------------------------------------------------
@@ -291,6 +289,8 @@ pub fn guiMain(allocator: std.mem.Allocator, hart: *Hart) !void {
 
         switch (current_screen) {
             .state => {
+                // ==== Keyboard Inputs ====
+
                 if (rl.isKeyPressed(.s) or rl.isKeyPressedRepeat(.s)) {
                     if (rl.isKeyDown(.left_shift) or rl.isKeyDown(.right_shift)) {
                         run = !run;
@@ -326,17 +326,32 @@ pub fn guiMain(allocator: std.mem.Allocator, hart: *Hart) !void {
 
                 // Switch screens, cancel all previous inputs that advance the emulator
                 if (rl.isKeyPressed(.m)) {
-                    current_screen = .memory;
+                    try screen_stack.append(allocator, .memory);
                     step = false;
                     reset = false;
                     run = false;
                 }
                 if (rl.isKeyPressed(.h)) {
-                    current_screen = .help;
+                    try screen_stack.append(allocator, .help);
                     step = false;
                     reset = false;
                     run = false;
                 }
+
+                // ==== Raygui elements ====
+
+                // Hart state
+                if (show_logical_state) {
+                    _ = rg.groupBox(.init(view_offset.x, view_offset.y, font_width * state_view_size_chars.x, font_height * state_view_size_chars.y), logical_state_view_title);
+                } else {
+                    _ = rg.groupBox(.init(view_offset.x, view_offset.y, font_width * state_view_size_chars.x, font_height * state_view_size_chars.y), state_view_title);
+                }
+                // Text output
+                _ = rg.groupBox(.init(text_output_view_offset.x, text_output_view_offset.y, font_width * text_output_view_size_chars.x, font_height * text_output_view_size_chars.y), text_output_view_title);
+                // Memory inspector
+                _ = rg.groupBox(.init(memory_view_offset.x, memory_view_offset.y, font_width * memory_view_size_chars.x, font_height * memory_view_size_chars.y), memory_view_title);
+
+                // ==== Logic ====
 
                 // Run emulator
                 if (hart.ebreak or hart.fatal_exception != null) {
@@ -365,14 +380,10 @@ pub fn guiMain(allocator: std.mem.Allocator, hart: *Hart) !void {
                     update_outputs = false;
                     if (show_logical_state) {
                         logical_state_str.deinit();
-                        allocator.free(logical_state_cstr);
                         logical_state_str = try hart.allocPrintLogicalState(allocator);
-                        logical_state_cstr = try allocator.dupeZ(u8, logical_state_str.slice);
 
                         allocator.free(csr_state_str);
-                        allocator.free(csr_state_cstr);
                         csr_state_str = try hart.allocPrintCSRs(allocator);
-                        csr_state_cstr = try allocator.dupeZ(u8, csr_state_str);
                     } else {
                         allocator.free(state_str);
                         allocator.free(state_cstr);
@@ -397,47 +408,98 @@ pub fn guiMain(allocator: std.mem.Allocator, hart: *Hart) !void {
                         }
                     }
 
-                    const mem = try hart.bus.getSlice(allocator, memory_view_address, 0x80);
+                    const mem = try hart.bus.getSlice(allocator, memory_view_address & 0xFFFF_FF80, 0x80);
                     defer allocator.free(mem);
                     memory_view_cstr = try bufPrintMemoryDump(memory_view_buffer, mem);
                 }
             },
             .memory => {
+                // ==== Keyboard Inputs ====
+
                 if (rl.isKeyPressed(.m) or rl.isKeyPressed(.escape)) {
-                    current_screen = .state;
+                    _ = screen_stack.pop();
                 }
                 if (rl.isKeyPressed(.h)) {
-                    current_screen = .help;
-                }
-                if (rl.isKeyPressed(.enter)) {
-                    memory_view_address = try std.fmt.parseInt(u32, memory_settings_input_writer.written(), 0);
-                    update_outputs = true;
-                    current_screen = .state;
-                    continue;
+                    try screen_stack.append(allocator, .help);
                 }
 
-                var k = rl.getKeyPressed();
-                while (k != .null) : (k = rl.getKeyPressed()) {
-                    switch (k) {
-                        .zero, .one, .two, .three, .four, .five, .six, .seven, .eight, .nine => {
-                            if (memory_settings_input_writer.written().len < 10) try memory_settings_input_writer.writer.writeByte(@as(u8, @intCast(@intFromEnum(k))));
-                        },
-                        .a, .b, .c, .d, .e, .f => {
-                            if (memory_settings_input_writer.written().len < 10) try memory_settings_input_writer.writer.writeByte(@as(u8, @intCast(@intFromEnum(k))));
-                        },
-                        .backspace => {
-                            if (memory_settings_input_writer.written().len > 2) memory_settings_input_writer.writer.undo(1);
-                            if (rl.isKeyDown(.left_control) or rl.isKeyDown(.right_control)) memory_settings_input_writer.writer.end = 2;
-                        },
-                        else => {},
+                // ==== Raygui elements ====
+
+                if (screen_stack.getLast() == .memory) {
+                    _ = rg.groupBox(.init(view_offset.x, view_offset.y, memory_settings_view_size_chars.x * font_width, memory_settings_view_size_chars.y * font_height), memory_settings_view_title);
+
+                    const label_text = "Address (hex, no '0x' prefix): ";
+                    const input_rect = rl.Rectangle.init(view_offset.x * 2 + @as(f32, @floatFromInt(rg.getTextWidth(label_text))), view_offset.y * 2, memory_settings_input_size_chars.x * font_width, memory_settings_input_size_chars.y * font_height);
+                    var label_rect = input_rect;
+                    label_rect.x -= @as(f32, @floatFromInt(rg.getTextWidth(label_text)));
+                    label_rect.width += @as(f32, @floatFromInt(rg.getTextWidth(label_text)));
+                    _ = rg.label(label_rect, label_text);
+
+                    _ = rg.textBox(input_rect, input_buffer, 9, true);
+
+                    label_rect.y += font_height;
+                    if (invalid_character) |c| {
+                        _ = rg.label(label_rect, try std.fmt.bufPrintZ(gp_buffer, "Invalid character: '{c}'", .{c}));
+                    }
+
+                    // ==== Logic ====
+
+                    // With QMK keyboards, layer tap keys tapped don't always get detected by games as having been pressed.
+                    // For some reason, the workaround is to get all keys pressed, which does reliably detect it.
+                    var k = rl.getKeyPressed();
+                    while (k != .null) : (k = rl.getKeyPressed()) {
+                        switch (k) {
+                            .enter => {
+                                memory_view_address = addrparse: {
+                                    invalid_character = null;
+                                    var addr: u32 = 0;
+                                    if (input_buffer[0] == 0) break :addrparse memory_view_address;
+                                    for (input_buffer[0..9 :0]) |c| {
+                                        switch (c) {
+                                            '0', '1', '2', '3', '4', '5', '6', '7', '8', '9' => {
+                                                addr <<= 4;
+                                                addr += c - '0';
+                                            },
+                                            'a', 'b', 'c', 'd', 'e', 'f' => {
+                                                addr <<= 4;
+                                                addr += c - 'a' + 10;
+                                            },
+                                            'A', 'B', 'C', 'D', 'E', 'F' => {
+                                                addr <<= 4;
+                                                addr += c - 'A' + 10;
+                                            },
+                                            0 => {
+                                                // End of string
+                                                break;
+                                            },
+                                            else => {
+                                                // Keep old value
+                                                invalid_character = c;
+                                                break :addrparse memory_view_address;
+                                            },
+                                        }
+                                    }
+                                    break :addrparse addr;
+                                };
+
+                                if (invalid_character == null) {
+                                    update_outputs = true;
+                                    _ = screen_stack.pop();
+                                    break;
+                                }
+                            },
+                            else => {},
+                        }
                     }
                 }
-                allocator.free(memory_settings_input_cstr);
-                memory_settings_input_cstr = try allocator.dupeZ(u8, memory_settings_input_writer.written());
             },
             .help => {
                 if (rl.isKeyPressed(.h) or rl.isKeyPressed(.escape)) {
-                    current_screen = .state;
+                    _ = screen_stack.pop();
+                }
+
+                if (screen_stack.getLast() == .help) {
+                    _ = rg.groupBox(.init(view_offset.x, view_offset.y, help_view_size_chars.x * font_width, help_view_size_chars.y * font_height), help_view_title);
                 }
             },
         }
@@ -448,27 +510,18 @@ pub fn guiMain(allocator: std.mem.Allocator, hart: *Hart) !void {
         rl.beginDrawing();
         defer rl.endDrawing();
 
-        rl.clearBackground(rl.Color.init(20, 20, 50, 255));
+        rl.clearBackground(bg_color);
 
-        if (show_fps) rl.drawFPS(10, 10);
+        if (show_fps) rl.drawFPS(5, screenHeight - 20);
 
         switch (current_screen) {
             .state => {
-                // Draw hart state
-                rl.drawRectangleRoundedLines(rl.Rectangle.init(view_offset.x, view_offset.y - 4, font_width * state_view_size_chars.x, font_height * state_view_size_chars.y + 4), 0.05, 4, border_color);
-
-                // Hart frequency
-                const freq_cstr = try std.fmt.bufPrintZ(gp_buffer, "{d} Hz", .{@as(u64, run_steps) * target_fps});
-                rl.drawTextEx(font, freq_cstr, view_offset.add(.{ .x = (state_view_size_chars.x - 3) * font_width - @as(f32, @floatFromInt(freq_cstr.len * font_width)), .y = 0 }), 16, 0, semaphore_colors[2]);
-
-                // Running indicator
-                rl.drawCircle(@as(i32, @intFromFloat(view_offset.x)) + @as(i32, @intFromFloat(state_view_size_chars.x - 2)) * font_width + @divTrunc(font_width, 2), @as(i32, @intFromFloat(view_offset.y)) + @divTrunc(font_height, 2), 8, if (halted) semaphore_colors[0] else if (run or step_indicator > 0) semaphore_colors[2] else semaphore_colors[1]);
-
+                // ==== Hart state ====
                 if (show_logical_state) {
-                    rl.drawTextEx(font, logical_state_view_title, view_offset.add(.{ .x = 2 * font_width, .y = 0 }), 16, 0, title_color);
+                    const full_logical_cstr = try std.fmt.bufPrintZ(gp_buffer, "{s}{s}", .{ logical_state_str.slice, csr_state_str });
 
+                    // This text has highlight information
                     if (logical_state_str.hi_end > logical_state_str.hi_begin) {
-                        // This text has highlight information
                         var line: i32 = 1;
                         var column: i32 = 0;
                         for (logical_state_str.slice, 0..) |ch, i| {
@@ -481,45 +534,29 @@ pub fn guiMain(allocator: std.mem.Allocator, hart: *Hart) !void {
                         }
                         rl.drawRectangleRounded(.{ .x = @floatFromInt(@as(i32, @intFromFloat(view_offset.x)) + column * font_width - 1), .y = @floatFromInt(@as(i32, @intFromFloat(view_offset.y)) + line * font_height - 1), .width = @floatFromInt(font_width * @as(i32, @intCast(logical_state_str.hi_end - logical_state_str.hi_begin)) + 2), .height = @floatFromInt(font_height) }, 0.2, 2, highlight_color);
                     }
-                    rl.drawTextEx(font, logical_state_cstr, view_offset.add(.{ .x = font_width, .y = font_height }), 16, 0, text_color);
 
-                    rl.drawTextEx(font, csr_state_cstr, view_offset.add(.{ .x = font_width, .y = font_height * 18 }), 16, 0, text_color);
+                    rl.drawTextEx(font, full_logical_cstr, view_offset.add(.{ .x = font_width, .y = font_height }), @floatFromInt(font.baseSize), 0, text_color);
                 } else {
-                    // Real hart state
-                    rl.drawTextEx(font, state_view_title, view_offset.add(.{ .x = 2 * font_width, .y = 0 }), 16, 0, title_color);
-                    rl.drawTextEx(font, state_cstr, view_offset.add(.{ .x = font_width, .y = font_height }), 16, 0, text_color);
+                    rl.drawTextEx(font, state_cstr, view_offset.add(.{ .x = font_width, .y = font_height }), @floatFromInt(font.baseSize), 0, text_color);
                 }
 
-                // Draw text output
-                rl.drawRectangleRoundedLines(rl.Rectangle.init(text_output_view_offset.x, text_output_view_offset.y - 4, font_width * text_output_view_size_chars.x, font_height * text_output_view_size_chars.y + 4), 0.05, 4, border_color);
+                // Hart frequency
+                const freq_cstr = try std.fmt.bufPrintZ(gp_buffer, "{d} Hz", .{@as(u64, run_steps) * target_fps});
+                rl.drawTextEx(font, freq_cstr, view_offset.add(.{ .x = (state_view_size_chars.x - 3) * font_width - @as(f32, @floatFromInt(freq_cstr.len * font_width)), .y = 3 }), 16, 0, highlight_color);
 
-                rl.drawTextEx(font, text_output_view_title, text_output_view_offset.add(.{ .x = 2 * font_width, .y = 0 }), 16, 0, title_color);
+                // Running indicator
+                rl.drawCircle(@as(i32, @intFromFloat(view_offset.x)) + @as(i32, @intFromFloat(state_view_size_chars.x - 2)) * font_width + @divTrunc(font_width, 2), @as(i32, @intFromFloat(view_offset.y)) + @divTrunc(font_height, 2) + 2, 6, if (halted) semaphore_colors[0] else if (run or step_indicator > 0) semaphore_colors[2] else semaphore_colors[1]);
 
+                // ==== Text output ====
                 text_output_view_textbox.drawText(text_output_cstr);
 
-                // Draw memory view
-                rl.drawRectangleRoundedLines(rl.Rectangle.init(memory_view_offset.x, memory_view_offset.y - @divTrunc(font_height, 2), font_width * memory_view_size_chars.x, font_height * memory_view_size_chars.y + @divTrunc(font_height, 2)), 0.1, 4, border_color);
-
-                rl.drawTextEx(font, memory_view_title, memory_view_offset.add(.{ .x = 2 * font_width, .y = 0 }), 16, 0, title_color);
-
+                // ==== Memory inspector ====
                 memory_view_textbox.drawText(memory_view_cstr);
             },
 
-            .memory => {
-                rl.drawRectangleRoundedLines(rl.Rectangle.init(view_offset.x, view_offset.y - 4, font_width * memory_settings_view_size_chars.x, font_height * memory_settings_view_size_chars.y + 4), 0.035, 4, border_color);
-
-                rl.drawTextEx(font, memory_settings_view_title, view_offset.add(.{ .x = 2 * font_width, .y = 0 }), 16, 0, title_color);
-
-                rl.drawRectangleRoundedLines(rl.Rectangle.init(memory_settings_input_textbox.rect.x - @divTrunc(font_width, 2), memory_settings_input_textbox.rect.y - @divTrunc(font_height, 3), memory_settings_input_textbox.rect.width + font_width, memory_settings_input_textbox.rect.height + @divTrunc(font_height, 2)), 0.1, 4, border_color);
-
-                memory_settings_input_textbox.drawText(memory_settings_input_cstr);
-            },
+            .memory => {},
 
             .help => {
-                rl.drawRectangleRoundedLines(rl.Rectangle.init(view_offset.x, view_offset.y - 4, font_width * help_view_size_chars.x, font_height * help_view_size_chars.y + 4), 0.035, 4, border_color);
-
-                rl.drawTextEx(font, help_view_title, view_offset.add(.{ .x = 2 * font_width, .y = 0 }), 16, 0, title_color);
-
                 // Show all keybinds for each screen
                 var line: i32 = 1;
                 inline for (@typeInfo(Screen).@"enum".fields) |s| {
@@ -560,10 +597,11 @@ pub fn guiMain(allocator: std.mem.Allocator, hart: *Hart) !void {
             },
         }
 
-        // Draw help hint
-        rl.drawTextEx(font, "Press ", view_offset.add(state_view_size_chars.multiply(.{ .x = 0, .y = font_height })).add(.{ .x = 0, .y = font_height }), 16, 0, secondary_text_color);
-        rl.drawTextEx(font, "h", view_offset.add(state_view_size_chars.multiply(.{ .x = 0, .y = font_height })).add(.{ .x = font_width * 6, .y = font_height }), 16, 0, keybind_color);
-        rl.drawTextEx(font, " for help", view_offset.add(state_view_size_chars.multiply(.{ .x = 0, .y = font_height })).add(.{ .x = font_width * 7, .y = font_height }), 16, 0, secondary_text_color);
+        // TODO redo this with raygui
+        // // Draw help hint
+        // rl.drawTextEx(font, "Press ", view_offset.add(state_view_size_chars.multiply(.{ .x = 0, .y = font_height })).add(.{ .x = 0, .y = font_height }), 16, 0, secondary_text_color);
+        // rl.drawTextEx(font, "h", view_offset.add(state_view_size_chars.multiply(.{ .x = 0, .y = font_height })).add(.{ .x = font_width * 6, .y = font_height }), 16, 0, keybind_color);
+        // rl.drawTextEx(font, " for help", view_offset.add(state_view_size_chars.multiply(.{ .x = 0, .y = font_height })).add(.{ .x = font_width * 7, .y = font_height }), 16, 0, secondary_text_color);
         //----------------------------------------------------------------------------------
     }
 }
@@ -859,4 +897,9 @@ fn bufPrintMemoryDump(buf: []u8, dump: []?u8) ![:0]u8 {
         sep = if ((i +% 1) & 0xF == 0) "\n" else if ((i +% 1) & 0x7 == 0) "  " else " ";
     }
     return @ptrCast(writer.written());
+}
+
+fn colorFromInt(int: anytype) rl.Color {
+    const c: u32 = @bitCast(int);
+    return .{ .r = @truncate(c >> 24), .g = @truncate(c >> 16), .b = @truncate(c >> 8), .a = @truncate(c) };
 }

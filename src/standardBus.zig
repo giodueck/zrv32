@@ -106,6 +106,7 @@ pub const StandardBus = struct {
     pub fn init(self: *@This(), allocator: std.mem.Allocator) !void {
         self.allocator = allocator;
         self.boot_rom = try self.allocator.alloc(u8, BootRomSize);
+        @memset(self.boot_rom, 0);
         self.ram = try common.SparseArray(u30, u8, u12).init(self.allocator);
         self.start = BootRomStart;
 
@@ -334,7 +335,7 @@ pub const StandardBus = struct {
     pub fn getSlice(self: *@This(), allocator: std.mem.Allocator, start_addr: u32, len: u32) error{OutOfMemory}![]?u8 {
         var slice = try allocator.alloc(?u8, len);
 
-        // First access all misaligned addresses, if any, at the start
+        // First access all misaligned addresses, if any, at the start to avoid misaligned errors
         const mastart = start_addr & 3;
         for (0..mastart) |i| {
             const addr = start_addr + @as(u32, @intCast(i));
@@ -410,4 +411,6 @@ pub const StandardBus = struct {
 
         return slice;
     }
+
+    // Then skip all trailing misaligned addresses
 };
