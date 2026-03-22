@@ -55,7 +55,7 @@
     - [x] Variable emulator speed
     - [x] Memory inspector
         - [x] Address selection controls
-        - [ ] Address display help on top and left of data
+        - [x] Address display help on top and left of data
     - [x] Switch to Raygui
 
 ## Architecture

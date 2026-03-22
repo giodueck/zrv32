@@ -146,6 +146,7 @@ pub fn guiMain(allocator: std.mem.Allocator, hart: *Hart) !void {
     const bg_color: rl.Color = colorFromInt(rg.getStyle(.default, .{ .default = .background_color }));
     const title_color: rl.Color = colorFromInt(rg.getStyle(.default, .{ .control = .text_color_pressed }));
     const text_color: rl.Color = colorFromInt(rg.getStyle(.default, .{ .control = .text_color_normal }));
+    const border_color: rl.Color = colorFromInt(rg.getStyle(.default, .{ .control = .border_color_normal }));
     const highlight_color: rl.Color = colorFromInt(rg.getStyle(.default, .{ .control = .base_color_pressed }));
     const keybind_color: rl.Color = colorFromInt(rg.getStyle(.default, .{ .control = .base_color_pressed }));
     const semaphore_colors: [3]rl.Color = [_]rl.Color{ .red, .yellow, .green };
@@ -184,6 +185,9 @@ pub fn guiMain(allocator: std.mem.Allocator, hart: *Hart) !void {
     defer allocator.free(memory_view_buffer);
     var memory_view_cstr: [:0]u8 = undefined; // must be defined in the first loop iteration
     var memory_view_address: u32 = hart.bus.getStart();
+    const memory_view_guide_buffer = try allocator.alloc(u8, 2048);
+    defer allocator.free(memory_view_guide_buffer);
+    var memory_view_guide_cstr: [:0]u8 = undefined; // must be defined in the first loop iteration
 
     // Memory settings view text input buffer
     var memory_settings_input_writer = std.io.Writer.Allocating.init(allocator);
@@ -237,7 +241,7 @@ pub fn guiMain(allocator: std.mem.Allocator, hart: *Hart) !void {
     // State window will take up a fixed size
     const state_view_size_chars = rl.Vector2.init(48, 29); // in characters
     // Memory dump output will take up a variable width
-    const memory_view_size_chars = rl.Vector2.init(16 * 3 + 2, 9); // in characters
+    const memory_view_size_chars = rl.Vector2.init(16 * 3 + 2 + 9, 9 + 1); // in characters
     // Text output will take up a variable width and height
     const text_output_view_offset = view_offset.add(state_view_size_chars.multiply(.{ .x = font_width, .y = 0 })).add(.{ .x = view_offset.x, .y = 0 });
     const text_output_view_size_chars = rl.Vector2.init(@round((screenWidth - view_offset.x * 3 - (state_view_size_chars.x * font_width)) / font_width), state_view_size_chars.y - memory_view_size_chars.y - view_offset.y / font_height); // in characters
@@ -411,6 +415,7 @@ pub fn guiMain(allocator: std.mem.Allocator, hart: *Hart) !void {
                     const mem = try hart.bus.getSlice(allocator, memory_view_address & 0xFFFF_FF80, 0x80);
                     defer allocator.free(mem);
                     memory_view_cstr = try bufPrintMemoryDump(memory_view_buffer, mem);
+                    memory_view_guide_cstr = try bufPrintMemoryDumpGuide(memory_view_guide_buffer, memory_view_address & 0xFFFF_FF80);
                 }
             },
             .memory => {
@@ -551,6 +556,9 @@ pub fn guiMain(allocator: std.mem.Allocator, hart: *Hart) !void {
                 text_output_view_textbox.drawText(text_output_cstr);
 
                 // ==== Memory inspector ====
+                memory_view_textbox.color = border_color;
+                memory_view_textbox.drawText(memory_view_guide_cstr);
+                memory_view_textbox.color = text_color;
                 memory_view_textbox.drawText(memory_view_cstr);
             },
 
@@ -883,7 +891,7 @@ const TextBox = struct {
 
 /// Prints a memory dump as a C string, stored on buf.
 fn bufPrintMemoryDump(buf: []u8, dump: []?u8) ![:0]u8 {
-    var sep: []const u8 = "";
+    var sep: []const u8 = "\n         ";
     @memset(buf, 0);
     var fba = std.heap.FixedBufferAllocator.init(buf);
     var writer = std.io.Writer.Allocating.init(fba.allocator());
@@ -894,8 +902,25 @@ fn bufPrintMemoryDump(buf: []u8, dump: []?u8) ![:0]u8 {
             try writer.writer.print("{s}{x:02}", .{ sep, byte.? });
         }
 
-        sep = if ((i +% 1) & 0xF == 0) "\n" else if ((i +% 1) & 0x7 == 0) "  " else " ";
+        sep = if ((i +% 1) & 0xF == 0) "\n         " else if ((i +% 1) & 0x7 == 0) "  " else " ";
     }
+    return @ptrCast(writer.written());
+}
+
+/// Prints a guide for the memory dump as a C string, stored on buf
+fn bufPrintMemoryDumpGuide(buf: []u8, addr: u32) ![:0]u8 {
+    @memset(buf, 0);
+    var fba = std.heap.FixedBufferAllocator.init(buf);
+    var writer = std.io.Writer.Allocating.init(fba.allocator());
+    try writer.writer.writeAll("          0  1  2  3  4  5  6  7   8  9  a  b  c  d  e  f\n");
+    try writer.writer.print("{x:08}\n", .{addr});
+    try writer.writer.print("{x:08}\n", .{addr + 0x10});
+    try writer.writer.print("{x:08}\n", .{addr + 0x20});
+    try writer.writer.print("{x:08}\n", .{addr + 0x30});
+    try writer.writer.print("{x:08}\n", .{addr + 0x40});
+    try writer.writer.print("{x:08}\n", .{addr + 0x50});
+    try writer.writer.print("{x:08}\n", .{addr + 0x60});
+    try writer.writer.print("{x:08}\n", .{addr + 0x70});
     return @ptrCast(writer.written());
 }
 
