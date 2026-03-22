@@ -18,3 +18,7 @@ The examples cover a range of the RV32I_Zicsr_Zifencei instruction set:
 - `exception_handling.s`, `user_mode.s`: exception handling, CSR instructions and privilege modes
 - `self_modifying.s`: self modifying code relying on Zifencei to work (will not work with a read-only executable section, only for demonstration)
 - `bare_bones_os.s`: entry point into an M-Mode OS with U-Mode code, complete with system calls and User exception handling
+
+## Developed
+
+`boot/` and `program/` contain hand-crafted programs that are more complex than the simple examples. They contain programs to be loaded as boot and program binaries, respectively

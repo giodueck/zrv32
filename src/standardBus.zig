@@ -78,6 +78,7 @@ const MemoryMap = .{
         .access = AccessControl{
             .read = true,
             .write = true,
+            .execute = true,
         },
         .start = RamStart,
         .size = RamSize,

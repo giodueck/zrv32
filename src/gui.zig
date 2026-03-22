@@ -375,6 +375,8 @@ pub fn guiMain(allocator: std.mem.Allocator, hart: *Hart) !void {
                 } else if (reset) {
                     hart.reset();
                     text_output_writer.clearRetainingCapacity();
+                    allocator.free(text_output_cstr);
+                    text_output_cstr = try allocator.dupeZ(u8, "");
                     update_outputs = true;
                     halted = false;
                 }
