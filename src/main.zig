@@ -15,7 +15,9 @@ pub fn main() !u8 {
     defer {
         switch (gpa.deinit()) {
             .ok => {},
-            .leak => {std.debug.print("Warning: Detected memory leaks!\n", .{});},
+            .leak => {
+                std.debug.print("Warning: Detected memory leaks!\n", .{});
+            },
         }
     }
 
@@ -51,14 +53,9 @@ pub fn main() !u8 {
             .takes_value = .one,
         },
         .{
-            // positional: boot program
-            .id = 'b',
-            .takes_value = .one,
-        },
-        .{
-            // positional: main program
+            // positional: boot binary, optional program binary
             .id = 'p',
-            .takes_value = .one,
+            .takes_value = .many,
         },
     };
 
@@ -148,13 +145,15 @@ pub fn main() !u8 {
             'a' => {
                 haltaddr = try std.fmt.parseInt(u32, arg.value.?, 0);
             },
-            'b' => {
-                boot_fd = try std.fs.cwd().openFile(arg.value.?, .{ .mode = .read_only });
-                boot_filename = try allocator.dupe(u8, arg.value.?);
-            },
-            'x' => {
-                program_fd = try std.fs.cwd().openFile(arg.value.?, .{ .mode = .read_only });
-                program_filename = try allocator.dupe(u8, arg.value.?);
+            // All positional args
+            'p' => {
+                if (boot_fd == null) {
+                    boot_fd = try std.fs.cwd().openFile(arg.value.?, .{ .mode = .read_only });
+                    boot_filename = try allocator.dupe(u8, arg.value.?);
+                } else {
+                    program_fd = try std.fs.cwd().openFile(arg.value.?, .{ .mode = .read_only });
+                    program_filename = try allocator.dupe(u8, arg.value.?);
+                }
             },
             else => unreachable,
         }
@@ -192,8 +191,14 @@ pub fn main() !u8 {
     var hart: Hart = .{ .bus = if (!do_test) bus.?.interface() else test_bus.?.interface() };
 
     if (boot_fd) |fd| {
+        defer {
+            allocator.free(boot_filename.?);
+            boot_filename = null;
+            fd.close();
+        }
+
         if (do_test) {
-            const buf = try allocator.alloc(u8, testBus.TestRamSize);
+            const buf = try allocator.alloc(u8, 0x1000);
             @memset(buf, 0);
             defer allocator.free(buf);
             var reader = fd.reader(buf);
@@ -201,12 +206,11 @@ pub fn main() !u8 {
                 try stderr.print("Test binary \"{s}\" too large: {d} out of a maximum of {d}\n", .{ boot_filename.?, try reader.getSize(), testBus.TestRamSize });
                 return 1;
             }
-            reader.interface.readSliceAll(buf) catch |e| {
-                if (e != error.EndOfStream) return e;
-            };
-            hart.loadProgramBytes(testBus.TestRamStart, buf);
+            const prog = try reader.interface.readAlloc(allocator, try reader.getSize());
+            defer allocator.free(prog);
+            hart.loadProgramBytes(testBus.TestRamStart, prog);
         } else {
-            const buf = try allocator.alloc(u8, standardBus.BootRomSize);
+            const buf = try allocator.alloc(u8, 0x1000);
             @memset(buf, 0);
             defer allocator.free(buf);
             var reader = fd.reader(buf);
@@ -214,15 +218,10 @@ pub fn main() !u8 {
                 try stderr.print("Boot binary \"{s}\" too large: {d} out of a maximum of {d}\n", .{ boot_filename.?, try reader.getSize(), standardBus.BootRomSize });
                 return 1;
             }
-            reader.interface.readSliceAll(buf) catch |e| {
-                if (e != error.EndOfStream) return e;
-            };
-            hart.loadProgramBytes(standardBus.BootRomStart, buf);
+            const prog = try reader.interface.readAlloc(allocator, try reader.getSize());
+            defer allocator.free(prog);
+            hart.loadProgramBytes(standardBus.BootRomStart, prog);
         }
-
-        allocator.free(boot_filename.?);
-        boot_filename = null;
-        fd.close();
     } else {
         try stderr.print("Error: No boot binary program loaded, aborting\n", .{});
         try stderr.writeAll(usage_str);
@@ -231,21 +230,22 @@ pub fn main() !u8 {
     }
 
     if (program_fd) |fd| {
-        const buf = try allocator.alloc(u8, standardBus.RamSize);
+        defer {
+            allocator.free(program_filename.?);
+            program_filename = null;
+            fd.close();
+        }
+
+        const buf = try allocator.alloc(u8, 0x1000);
         defer allocator.free(buf);
         var reader = fd.reader(buf);
         if (try reader.getSize() > standardBus.RamSize) {
             try stderr.print("Program binary \"{s}\" too large: {d} out of a maximum of {d}\n", .{ program_filename.?, try reader.getSize(), standardBus.RamSize });
             return 1;
         }
-        reader.interface.readSliceAll(buf) catch |e| {
-            if (e != error.EndOfStream) return e;
-        };
-        hart.loadProgramBytes(standardBus.RamStart, buf);
-
-        allocator.free(program_filename.?);
-        program_filename = null;
-        fd.close();
+        const prog = try reader.interface.readAlloc(allocator, try reader.getSize());
+        defer allocator.free(prog);
+        hart.loadProgramBytes(standardBus.RamStart, prog);
     } else {
         try stderr.print("Warning: No program binary loaded\n", .{});
         try stderr.flush();
