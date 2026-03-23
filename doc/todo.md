@@ -22,6 +22,7 @@
 - [x] Control transfer
     - [x] Unconditional jumps
     - [x] Conditional branching
+    - [ ] Misaligned instruction address exception generated at branch
 - [x] Load and Store
     - [x] lw, lh, lb, lhu, lbu
     - [x] sw, sh, sb
@@ -77,3 +78,12 @@
 - [x] RAM (hash map accesses are slow): replaced with a sparse array, which is what was needed anyways.
 - [ ] standardBus.load (13% of the runtime at ~490KHz)
 - [ ] Hart.step (13% of the runtime at ~490KHz)
+
+## Custom instructions
+
+For eventual implementation in Factorio, two custom instructions would be good to have:
+
+- [ ] pow, powi: integer exponentiation, `pow/i rd, rs1, rs2/imm12` does `rd <- rs1^(rs2/imm12)`, where `^` is the power operator. R and I types.
+- [ ] memcpy: copy an block of registers to a different address in memory. The addresses must be aligned to a predefined block size, dependent on the memory cell implementation. `memcpy rs1, rs2` copies the block starting at the address stored in `rs1` into the block starting at the address stored in `rs2`. Access faults raise exceptions. R type.
+
+Both instructions may be implemented to run in very short times. The first can be implemented in a single combinator with a built-in function. The second uses the fact that dense memory in Factorio is implemented as an array of memory cells, each holding many 32-bit signals, which means a wipe and rewrite of all signals at once is even simpler than just accessing one of those signals. E.g. a memory cell holding 64 32-bit signals spans 256 bytes in address space, which then defines 256 as the block size for `memcpy`.
