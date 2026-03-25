@@ -79,3 +79,71 @@ pub fn SparseArray(index_type: type, data_type: type, page_index_type: type) typ
         }
     };
 }
+
+pub const QueueError = error {QueueFull, QueueEmpty};
+
+/// A queue data structure with a fixed capacity
+pub fn Queue(data_type: type) type {
+    return struct {
+        const T = data_type;
+
+        allocator: std.mem.Allocator,
+
+        ring: []T,
+        /// Always indexes the value at the front of the queue. If it is equal to back, there
+        /// is no value at the front and attempts to dequeue will return an error to indicate it.
+        front: usize = 0,
+        /// Indexes the position to enqueue items to. If enqueuing would lead to being equal
+        /// to front, the operation returns an error indicating the queue is full.
+        back: usize = 0,
+
+        pub fn init(allocator: std.mem.Allocator, capacity: usize) !@This() {
+            const ring = try allocator.alloc(T, capacity);
+            return .{
+                .allocator = allocator,
+                .ring = ring,
+                .front = 0,
+                .back = 0,
+            };
+        }
+
+        pub fn deinit(self: *@This()) void {
+            self.allocator.free(self.ring);
+        }
+
+        /// Add an item to the queue
+        pub fn enqueue(self: *@This(), item: T) QueueError!void {
+            if ((self.front + self.back) % self.ring.len == self.ring.len - 1) {
+                return QueueError.QueueFull;
+            }
+            self.ring[self.back] = item;
+            self.back += 1;
+            self.back %= self.ring.len;
+        }
+
+        /// Remove an item from the queue
+        pub fn dequeue(self: *@This()) QueueError!T {
+            if (self.front == self.back) {
+                return QueueError.QueueEmpty;
+            }
+            const item = self.ring[self.front];
+            self.front += 1;
+            self.front %= self.ring.len;
+            return item;
+        }
+
+        /// Get the item at the front of the queue without removing it
+        pub fn peek(self: *@This()) QueueError!T {
+            if (self.front == self.back) {
+                return QueueError.QueueEmpty;
+            }
+            return self.ring[self.front];
+        }
+
+        /// Empty the queue without consuming its data
+        pub fn clear(self: *@This()) void {
+            self.front = 0;
+            self.back = 0;
+        }
+    };
+}

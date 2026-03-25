@@ -38,7 +38,8 @@ const MmioDevice = @import("MmioDevice.zig");
 const MemoryError = Bus.MemoryError;
 const AccessControl = Bus.AccessControl;
 const Width = Bus.Width;
-const CharDev = @import("CharDev.zig");
+const OutputCharDev = @import("OutputCharDev.zig");
+const InputCharDev = @import("InputCharDev.zig");
 const CLInt = @import("CLInt.zig");
 
 pub const RamStart: u32 = 0x8000_0000;
@@ -87,7 +88,8 @@ const MemoryMap = .{
 
 const DeviceAddresses = .{
     .clint = &[_]u32{ 0x100, 0x104, 0x108, 0x10c },
-    .chardev = &[_]u32{0x200},
+    .outchardev = &[_]u32{0x200},
+    .inchardev = &[_]u32{0x204},
 };
 
 pub const StandardBus = struct {
@@ -99,8 +101,9 @@ pub const StandardBus = struct {
 
     start: u32 = BootRomStart,
 
-    chardev: CharDev = undefined,
     clint: CLInt = undefined,
+    outchardev: OutputCharDev = undefined,
+    inchardev: InputCharDev = undefined,
 
     devices: std.ArrayList(MmioDevice) = std.ArrayList(MmioDevice).empty,
 
@@ -112,10 +115,12 @@ pub const StandardBus = struct {
         self.start = BootRomStart;
 
         self.devices = std.ArrayList(MmioDevice).empty;
-        self.chardev.init(null, DeviceAddresses.chardev);
-        try self.devices.append(self.allocator, self.chardev.interface());
         self.clint.init(DeviceAddresses.clint);
         try self.devices.append(self.allocator, self.clint.interface());
+        self.outchardev.init(null, DeviceAddresses.outchardev);
+        try self.devices.append(self.allocator, self.outchardev.interface());
+        self.inchardev.init(null, DeviceAddresses.inchardev);
+        try self.devices.append(self.allocator, self.inchardev.interface());
     }
 
     pub fn deinit(self: *@This()) void {
@@ -128,8 +133,12 @@ pub const StandardBus = struct {
         return Bus.implBy(self);
     }
 
-    pub fn setCharDevWriter(self: *@This(), writer: *std.io.Writer) void {
-        self.chardev.init(writer, DeviceAddresses.chardev);
+    pub fn setOutputCharDevWriter(self: *@This(), writer: *std.io.Writer) void {
+        self.outchardev.init(writer, DeviceAddresses.outchardev);
+    }
+
+    pub fn setInputCharDevReader(self: *@This(), reader: *std.io.Reader) void {
+        self.inchardev.init(reader, DeviceAddresses.inchardev);
     }
 
     pub fn stepDevices(self: *@This()) void {

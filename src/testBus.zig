@@ -50,9 +50,16 @@ pub const TestBus = struct {
         return Bus.implBy(self);
     }
 
-    pub fn setCharDevWriter(self: *@This(), writer: *std.io.Writer) void {
+    /// Stub: unimplemented
+    pub fn setOutputCharDevWriter(self: *@This(), writer: *std.io.Writer) void {
         _ = self;
         _ = writer;
+    }
+
+    /// Stub: unimplemented
+    pub fn setInputCharDevReader(self: *@This(), reader: *std.io.Reader) void {
+        _ = self;
+        _ = reader;
     }
 
     pub fn stepDevices(self: *@This()) void {

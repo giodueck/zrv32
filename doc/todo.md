@@ -50,6 +50,7 @@
     - [x] Text output view
         - [x] Wrapping text
         - [x] Scrolling
+        - [ ] Backspace handling
         - [ ] ANSI escape sequences
     - [x] Help screen
     - [x] Mode indicator (step, running, halted)
@@ -69,7 +70,7 @@
 ## Input/Output
 
 - [x] Text output
-- [ ] Text input
+- [x] Text input
 - [ ] Color screen
 - [ ] Block device (storage device)
 

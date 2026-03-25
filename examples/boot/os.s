@@ -13,10 +13,12 @@
     2. putc: print a single character
     3. puts: print a 0 terminated string
     4. nputs: print a 0 terminated string or n characters
+    5. getc: read a single character from input. If input is empty, returns -1
 */
 
 .equ mtime, 0x100
-.equ chardev, 0x200
+.equ outchardev, 0x200
+.equ inchardev, 0x204
 .equ initialsp, 0xC0000000
 
     .macro padded_string string, max
@@ -118,6 +120,8 @@ syscall:
     beq a7, t0, sys_puts
     li t0, 4
     beq a7, t0, sys_nputs
+    li t0, 5
+    beq a7, t0, sys_getc
 
     li a0, -1
     ret
@@ -169,6 +173,19 @@ sys_nputs:
 
     ret
 
+# Read a single character from input. If the input is empty, the returned value is -1
+# int getc();
+sys_getc:
+    addi sp, sp, -8
+    sw ra, 0(sp)
+
+    call kgetc
+
+    lw ra, 0(sp)
+    addi sp, sp, 8
+
+    ret
+
 # Print message about bad exception, then stop the emulator
 # [[noreturn]] void bad_exception(struct regs *, int cause)
 bad_exception:
@@ -208,7 +225,7 @@ hex_chars:
 # Print string by accessing MMIO character device.
 # void kputs(const char *);
 kputs:
-    la t1, chardev
+    la t1, outchardev
 1:
     lb t0, 0(a0)
     beq t0, zero, 2f
@@ -222,7 +239,7 @@ kputs:
 # Print string by accessing MMIO character device.
 # void knputs(const char *, int);
 knputs:
-    la t1, chardev
+    la t1, outchardev
     li t0, 0
 1:
     beq t0, a0, 2f
@@ -236,11 +253,19 @@ knputs:
     ret
 
 
-# Print character by accessing MMIO character device.
+# Print character by accessing MMIO character output device.
 # void kputc(char);
 kputc:
-    la t1, chardev
+    la t1, outchardev
     sw a0, 0(t1)
+    ret
+
+
+# Get a single character from MMIO character input device. If the input is empty, reads -1.
+# int kgetc();
+kgetc:
+    la t1, inchardev
+    lw a0, 0(t1)
     ret
 
 

@@ -176,9 +176,17 @@ pub fn guiMain(allocator: std.mem.Allocator, hart: *Hart) !void {
     // Text output writer
     var text_output_writer = std.io.Writer.Allocating.init(allocator);
     defer text_output_writer.deinit();
-    hart.bus.setCharDevWriter(&text_output_writer.writer);
+    hart.bus.setOutputCharDevWriter(&text_output_writer.writer);
     var text_output_cstr = try allocator.dupeZ(u8, text_output_writer.written());
     defer allocator.free(text_output_cstr);
+
+    // Text input writer
+    var text_input_writer = std.io.Writer.Allocating.init(allocator);
+    defer text_input_writer.deinit();
+    var text_input_slice: []u8 = try allocator.dupe(u8, text_input_writer.written());
+    defer allocator.free(text_input_slice);
+    var text_input_reader = std.io.Reader.fixed(text_input_slice);
+    hart.bus.setInputCharDevReader(&text_input_reader);
 
     // Memory view buffer
     const memory_view_buffer = try allocator.allocSentinel(u8, 2048, 0);
@@ -258,6 +266,7 @@ pub fn guiMain(allocator: std.mem.Allocator, hart: *Hart) !void {
         .word_wrap = false,
         .color = text_color,
     };
+    const text_output_rec = rl.Rectangle.init(text_output_view_offset.x, text_output_view_offset.y, font_width * text_output_view_size_chars.x, font_height * text_output_view_size_chars.y);
     // Memory dump will show below text output
     const memory_view_offset = view_offset.add(state_view_size_chars.multiply(.{ .x = font_width, .y = 0 })).add(text_output_view_size_chars.multiply(.{ .x = 0, .y = font_height }).add(view_offset)); // in pixels
     var memory_view_textbox: TextBox = .{
@@ -295,51 +304,74 @@ pub fn guiMain(allocator: std.mem.Allocator, hart: *Hart) !void {
             .state => {
                 // ==== Keyboard Inputs ====
 
-                if (rl.isKeyPressed(.s) or rl.isKeyPressedRepeat(.s)) {
-                    if (rl.isKeyDown(.left_shift) or rl.isKeyDown(.right_shift)) {
-                        run = !run;
-                    } else {
-                        step = true;
-                        step_indicator = step_indicator_count;
-                    }
-                }
-                if (rl.isKeyPressed(.r)) {
-                    reset = true;
-                }
-                if (rl.isKeyPressed(.t)) {
-                    show_logical_state = !show_logical_state;
-                    update_outputs = true;
-                }
-                if (rl.isKeyPressed(.period) or rl.isKeyPressedRepeat(.period)) {
-                    if (rl.isKeyDown(.left_shift) or rl.isKeyDown(.right_shift)) {
-                        run_steps <<|= 1;
-                    } else {
-                        run_steps +|= 1;
-                    }
-                }
-                if (rl.isKeyPressed(.comma) or rl.isKeyPressedRepeat(.comma)) {
-                    if (rl.isKeyDown(.left_shift) or rl.isKeyDown(.right_shift)) {
-                        if (run_steps >= 2) run_steps >>= 1;
-                    } else if (run_steps > 1) {
-                        run_steps -= 1;
-                    }
-                }
+                // TODO indicator for this
+                const text_focused = rl.checkCollisionPointRec(rl.getMousePosition(), text_output_rec);
+
+                // Non-text inputs
                 if (rl.isKeyPressed(.f3)) {
                     show_fps = !show_fps;
                 }
 
-                // Switch screens, cancel all previous inputs that advance the emulator
-                if (rl.isKeyPressed(.m)) {
-                    try screen_stack.append(allocator, .memory);
-                    step = false;
-                    reset = false;
-                    run = false;
-                }
-                if (rl.isKeyPressed(.h)) {
-                    try screen_stack.append(allocator, .help);
-                    step = false;
-                    reset = false;
-                    run = false;
+                if (!text_focused) {
+                    if (rl.isKeyPressed(.s) or rl.isKeyPressedRepeat(.s)) {
+                        if (rl.isKeyDown(.left_shift) or rl.isKeyDown(.right_shift)) {
+                            run = !run;
+                        } else {
+                            step = true;
+                            step_indicator = step_indicator_count;
+                        }
+                    }
+                    if (rl.isKeyPressed(.r)) {
+                        reset = true;
+                    }
+                    if (rl.isKeyPressed(.t)) {
+                        show_logical_state = !show_logical_state;
+                        update_outputs = true;
+                    }
+                    if (rl.isKeyPressed(.period) or rl.isKeyPressedRepeat(.period)) {
+                        if (rl.isKeyDown(.left_shift) or rl.isKeyDown(.right_shift)) {
+                            run_steps <<|= 1;
+                        } else {
+                            run_steps +|= 1;
+                        }
+                    }
+                    if (rl.isKeyPressed(.comma) or rl.isKeyPressedRepeat(.comma)) {
+                        if (rl.isKeyDown(.left_shift) or rl.isKeyDown(.right_shift)) {
+                            if (run_steps >= 2) run_steps >>= 1;
+                        } else if (run_steps > 1) {
+                            run_steps -= 1;
+                        }
+                    }
+
+                    // Switch screens, cancel all previous inputs that advance the emulator
+                    if (rl.isKeyPressed(.m)) {
+                        try screen_stack.append(allocator, .memory);
+                        step = false;
+                        reset = false;
+                        run = false;
+                    }
+                    if (rl.isKeyPressed(.h)) {
+                        try screen_stack.append(allocator, .help);
+                        step = false;
+                        reset = false;
+                        run = false;
+                    }
+                } else {
+                    // Write all text into the text_input_reader
+                    if (try getTypedText(&text_input_writer.writer)) {
+                        // If new text was written, update the reader
+                        const unread = try text_input_reader.allocRemaining(allocator, .unlimited);
+                        defer allocator.free(unread);
+                        const written = try text_input_writer.toOwnedSlice();
+                        defer allocator.free(written);
+                        try text_input_writer.writer.writeAll(unread);
+                        try text_input_writer.writer.writeAll(written);
+                        allocator.free(text_input_slice);
+                        text_input_slice = try text_input_writer.toOwnedSlice();
+                        text_input_reader = std.io.Reader.fixed(text_input_slice);
+                        std.debug.print("{s}\n", .{text_input_slice});
+                        hart.bus.setInputCharDevReader(&text_input_reader);
+                    }
                 }
 
                 // ==== Raygui elements ====
@@ -351,7 +383,7 @@ pub fn guiMain(allocator: std.mem.Allocator, hart: *Hart) !void {
                     _ = rg.groupBox(.init(view_offset.x, view_offset.y, font_width * state_view_size_chars.x, font_height * state_view_size_chars.y), state_view_title);
                 }
                 // Text output
-                _ = rg.groupBox(.init(text_output_view_offset.x, text_output_view_offset.y, font_width * text_output_view_size_chars.x, font_height * text_output_view_size_chars.y), text_output_view_title);
+                _ = rg.groupBox(text_output_rec, text_output_view_title);
                 // Memory inspector
                 _ = rg.groupBox(.init(memory_view_offset.x, memory_view_offset.y, font_width * memory_view_size_chars.x, font_height * memory_view_size_chars.y), memory_view_title);
 
@@ -639,6 +671,7 @@ const TextBox = struct {
     /// Last drawText call skipped all characters up to this index
     last_scroll_skip_end: isize = -1,
 
+    // TODO text preprocessing function to handle backspace, tabs and other special characters before drawing
     pub fn drawText(self: *@This(), text: [:0]const u8) void {
         var text_offset: rl.Vector2 = .{ .x = 0, .y = 0 };
         var column: i32 = 0; // For tab expansion
@@ -929,4 +962,188 @@ fn bufPrintMemoryDumpGuide(buf: []u8, addr: u32) ![:0]u8 {
 fn colorFromInt(int: anytype) rl.Color {
     const c: u32 = @bitCast(int);
     return .{ .r = @truncate(c >> 24), .g = @truncate(c >> 16), .b = @truncate(c >> 8), .a = @truncate(c) };
+}
+
+/// Puts all text typed in a frame into the writer. Iff any text was written, returns true.
+fn getTypedText(writer: *std.io.Writer) !bool {
+    var k = rl.getKeyPressed();
+    if (k == .null) return false;
+    while (k != .null) : (k = rl.getKeyPressed()) {
+        std.debug.print("{any}\n", .{k});
+        switch (@intFromEnum(k)) {
+            0...255 => {
+                const ch: u8 = @intCast(@intFromEnum(k));
+                switch (ch) {
+                    'A'...'Z' => {
+                        if (rl.isKeyDown(.left_shift) or rl.isKeyDown(.right_shift)) {
+                            try writer.writeByte(ch);
+                        } else {
+                            try writer.writeByte(ch - 'A' + 'a');
+                        }
+                    },
+                    '0' => {
+                        if (rl.isKeyDown(.left_shift) or rl.isKeyDown(.right_shift)) {
+                            try writer.writeByte(')');
+                        } else {
+                            try writer.writeByte(ch);
+                        }
+                    },
+                    '1' => {
+                        if (rl.isKeyDown(.left_shift) or rl.isKeyDown(.right_shift)) {
+                            try writer.writeByte('!');
+                        } else {
+                            try writer.writeByte(ch);
+                        }
+                    },
+                    '2' => {
+                        if (rl.isKeyDown(.left_shift) or rl.isKeyDown(.right_shift)) {
+                            try writer.writeByte('@');
+                        } else {
+                            try writer.writeByte(ch);
+                        }
+                    },
+                    '3' => {
+                        if (rl.isKeyDown(.left_shift) or rl.isKeyDown(.right_shift)) {
+                            try writer.writeByte('#');
+                        } else {
+                            try writer.writeByte(ch);
+                        }
+                    },
+                    '4' => {
+                        if (rl.isKeyDown(.left_shift) or rl.isKeyDown(.right_shift)) {
+                            try writer.writeByte('$');
+                        } else {
+                            try writer.writeByte(ch);
+                        }
+                    },
+                    '5' => {
+                        if (rl.isKeyDown(.left_shift) or rl.isKeyDown(.right_shift)) {
+                            try writer.writeByte('%');
+                        } else {
+                            try writer.writeByte(ch);
+                        }
+                    },
+                    '6' => {
+                        if (rl.isKeyDown(.left_shift) or rl.isKeyDown(.right_shift)) {
+                            try writer.writeByte('^');
+                        } else {
+                            try writer.writeByte(ch);
+                        }
+                    },
+                    '7' => {
+                        if (rl.isKeyDown(.left_shift) or rl.isKeyDown(.right_shift)) {
+                            try writer.writeByte('&');
+                        } else {
+                            try writer.writeByte(ch);
+                        }
+                    },
+                    '8' => {
+                        if (rl.isKeyDown(.left_shift) or rl.isKeyDown(.right_shift)) {
+                            try writer.writeByte('*');
+                        } else {
+                            try writer.writeByte(ch);
+                        }
+                    },
+                    '9' => {
+                        if (rl.isKeyDown(.left_shift) or rl.isKeyDown(.right_shift)) {
+                            try writer.writeByte('(');
+                        } else {
+                            try writer.writeByte(ch);
+                        }
+                    },
+                    '\'' => {
+                        if (rl.isKeyDown(.left_shift) or rl.isKeyDown(.right_shift)) {
+                            try writer.writeByte('"');
+                        } else {
+                            try writer.writeByte(ch);
+                        }
+                    },
+                    ',' => {
+                        if (rl.isKeyDown(.left_shift) or rl.isKeyDown(.right_shift)) {
+                            try writer.writeByte('<');
+                        } else {
+                            try writer.writeByte(ch);
+                        }
+                    },
+                    '-' => {
+                        if (rl.isKeyDown(.left_shift) or rl.isKeyDown(.right_shift)) {
+                            try writer.writeByte('_');
+                        } else {
+                            try writer.writeByte(ch);
+                        }
+                    },
+                    '.' => {
+                        if (rl.isKeyDown(.left_shift) or rl.isKeyDown(.right_shift)) {
+                            try writer.writeByte('>');
+                        } else {
+                            try writer.writeByte(ch);
+                        }
+                    },
+                    '/' => {
+                        if (rl.isKeyDown(.left_shift) or rl.isKeyDown(.right_shift)) {
+                            try writer.writeByte('?');
+                        } else {
+                            try writer.writeByte(ch);
+                        }
+                    },
+                    ';' => {
+                        if (rl.isKeyDown(.left_shift) or rl.isKeyDown(.right_shift)) {
+                            try writer.writeByte(':');
+                        } else {
+                            try writer.writeByte(ch);
+                        }
+                    },
+                    '=' => {
+                        if (rl.isKeyDown(.left_shift) or rl.isKeyDown(.right_shift)) {
+                            try writer.writeByte('+');
+                        } else {
+                            try writer.writeByte(ch);
+                        }
+                    },
+                    '[' => {
+                        if (rl.isKeyDown(.left_shift) or rl.isKeyDown(.right_shift)) {
+                            try writer.writeByte('{');
+                        } else {
+                            try writer.writeByte(ch);
+                        }
+                    },
+                    '\\' => {
+                        if (rl.isKeyDown(.left_shift) or rl.isKeyDown(.right_shift)) {
+                            try writer.writeByte('|');
+                        } else {
+                            try writer.writeByte(ch);
+                        }
+                    },
+                    ']' => {
+                        if (rl.isKeyDown(.left_shift) or rl.isKeyDown(.right_shift)) {
+                            try writer.writeByte('}');
+                        } else {
+                            try writer.writeByte(ch);
+                        }
+                    },
+                    '`' => {
+                        if (rl.isKeyDown(.left_shift) or rl.isKeyDown(.right_shift)) {
+                            try writer.writeByte('~');
+                        } else {
+                            try writer.writeByte(ch);
+                        }
+                    },
+                    else => {
+                        try writer.writeByte(ch);
+                    },
+                }
+            },
+            @intFromEnum(rl.KeyboardKey.enter) => {
+                try writer.writeByte('\n');
+            },
+            @intFromEnum(rl.KeyboardKey.tab) => {
+                try writer.writeByte('\t');
+            },
+            @intFromEnum(rl.KeyboardKey.backspace) => {
+                try writer.writeByte(0x08);
+            },
+            else => {},
+        }
+    }
+    return true;
 }

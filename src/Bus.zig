@@ -33,7 +33,8 @@ _get: *const fn (*anyopaque, u32, Width) u32,
 _store: *const fn (*anyopaque, u32, u32, Width) MemoryError!void,
 _load: *const fn (*anyopaque, u32, Width) MemoryError!u32,
 _fetch: *const fn (*anyopaque, u32) MemoryError!u32,
-_setCharDevWriter: *const fn (*anyopaque, *std.io.Writer) void,
+_setOutputCharDevWriter: *const fn (*anyopaque, *std.io.Writer) void,
+_setInputCharDevReader: *const fn (*anyopaque, *std.io.Reader) void,
 _getStart: *const fn (*anyopaque) u32,
 _stepDevices: *const fn (*anyopaque) void,
 _getTimeAddrs: *const fn (*anyopaque) ?[4]u32,
@@ -83,8 +84,12 @@ pub fn fetch(self: Bus, addr: u32) MemoryError!u32 {
 }
 
 /// Set the text output device writer
-pub fn setCharDevWriter(self: Bus, writer: *std.io.Writer) void {
-    return self._setCharDevWriter(self.impl, writer);
+pub fn setOutputCharDevWriter(self: Bus, writer: *std.io.Writer) void {
+    self._setOutputCharDevWriter(self.impl, writer);
+}
+
+pub fn setInputCharDevReader(self: Bus, reader: *std.io.Reader) void {
+    self._setInputCharDevReader(self.impl, reader);
 }
 
 /// Get PC reset value
@@ -93,7 +98,7 @@ pub fn getStart(self: Bus) u32 {
 }
 
 pub fn stepDevices(self: Bus) void {
-    return self._stepDevices(self.impl);
+    self._stepDevices(self.impl);
 }
 
 /// Get the addresses for mtime, mtimeh, mtimecmp and mtimecmph, in that order
@@ -116,7 +121,8 @@ pub fn implBy(impl_obj: anytype) Bus {
         ._get = delegate.get,
         ._load = delegate.load,
         ._fetch = delegate.fetch,
-        ._setCharDevWriter = delegate.setCharDevWriter,
+        ._setOutputCharDevWriter = delegate.setOutputCharDevWriter,
+        ._setInputCharDevReader = delegate.setInputCharDevReader,
         ._getStart = delegate.getStart,
         ._stepDevices = delegate.stepDevices,
         ._getTimeAddrs = delegate.getTimeAddrs,
@@ -142,8 +148,11 @@ inline fn BusDelegate(impl_obj: anytype) type {
         pub fn fetch(impl: *anyopaque, addr: u32) MemoryError!u32 {
             return TPtr(ImplType, impl).fetch(addr);
         }
-        pub fn setCharDevWriter(impl: *anyopaque, writer: *std.io.Writer) void {
-            return TPtr(ImplType, impl).setCharDevWriter(writer);
+        pub fn setOutputCharDevWriter(impl: *anyopaque, writer: *std.io.Writer) void {
+            return TPtr(ImplType, impl).setOutputCharDevWriter(writer);
+        }
+        pub fn setInputCharDevReader(impl: *anyopaque, reader: *std.io.Reader) void {
+            return TPtr(ImplType, impl).setInputCharDevReader(reader);
         }
         pub fn getStart(impl: *anyopaque) u32 {
             return TPtr(ImplType, impl).start;

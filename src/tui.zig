@@ -98,7 +98,7 @@ pub fn tuiMain(allocator: std.mem.Allocator, hart: *Hart) !void {
     // Text output writer
     var raw_output_writer = std.io.Writer.Allocating.init(allocator);
     defer raw_output_writer.deinit();
-    hart.bus.setCharDevWriter(&raw_output_writer.writer);
+    hart.bus.setOutputCharDevWriter(&raw_output_writer.writer);
 
     const output_view_title = "Output";
     var output_title_view = TextView{ .scroll_view = .{ .vertical_scrollbar = .{ .character = .{ .grapheme = " ", .width = 0 } } } };
