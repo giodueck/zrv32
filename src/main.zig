@@ -505,3 +505,20 @@ test "sw, sh, sb" {
     try expectEqual(0x5678, hart.bus.get(standardBus.RamStart + 128 + 4, .halfword));
     try expectEqual(0x78, hart.bus.get(standardBus.RamStart + 128 + 8, .byte));
 }
+
+test "mul, mulh, mulsu, mulhu" {
+    try checkInstr(.{.t0 = 0x123456, .t1 = 0x111555 }, "mul t2, t0, t1", .{ .t0 = 0x123456, .t1 = 0x111555, .t2 = 0xFE0C6E8E });
+    try checkInstr(.{.t0 = 0x123456, .t1 = 0x111555 }, "mulh t2, t0, t1", .{ .t0 = 0x123456, .t1 = 0x111555, .t2 = 0x136 });
+    try checkInstr(.{.t0 = 0x123456, .t1 = 0x111555 }, "mulhu t2, t0, t1", .{ .t0 = 0x123456, .t1 = 0x111555, .t2 = 0x136 });
+    try checkInstr(.{.t0 = 0x123456, .t1 = 0x111555 }, "mulsu t2, t0, t1", .{ .t0 = 0x123456, .t1 = 0x111555, .t2 = 0x136 });
+
+    try checkInstr(.{.t0 = 0x87123456, .t1 = 0x111555 }, "mul t2, t0, t1", .{ .t0 = 0x87123456, .t1 = 0x111555, .t2 = 0xD10C6E8E });
+    try checkInstr(.{.t0 = 0x87123456, .t1 = 0x111555 }, "mulh t2, t0, t1", .{ .t0 = 0x87123456, .t1 = 0x111555, .t2 = 0xFFF7EE21 });
+    try checkInstr(.{.t0 = 0x87123456, .t1 = 0x111555 }, "mulhu t2, t0, t1", .{ .t0 = 0x87123456, .t1 = 0x111555, .t2 = 0x90376 });
+    try checkInstr(.{.t0 = 0x87123456, .t1 = 0x111555 }, "mulsu t2, t0, t1", .{ .t0 = 0x87123456, .t1 = 0x111555, .t2 = 0xFFF7EE21 });
+
+    try checkInstr(.{.t0 = 0x87123456, .t1 = 0x87111555 }, "mul t2, t0, t1", .{ .t0 = 0x87123456, .t1 = 0x87111555, .t2 = 0x2B0C6E8E });
+    try checkInstr(.{.t0 = 0x87123456, .t1 = 0x87111555 }, "mulh t2, t0, t1", .{ .t0 = 0x87123456, .t1 = 0x87111555, .t2 = 0x39205365 });
+    try checkInstr(.{.t0 = 0x87123456, .t1 = 0x87111555 }, "mulhu t2, t0, t1", .{ .t0 = 0x87123456, .t1 = 0x87111555, .t2 = 0x47439D10 });
+    try checkInstr(.{.t0 = 0x87123456, .t1 = 0x87111555 }, "mulsu t2, t0, t1", .{ .t0 = 0x87123456, .t1 = 0x87111555, .t2 = 0xC03287BB });
+}
