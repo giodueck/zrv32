@@ -509,43 +509,56 @@ test "sw, sh, sb" {
 }
 
 test "mul, mulh, mulsu, mulhu" {
-    try checkInstr(.{ .t0 = 0x123456, .t1 = 0x111555 }, "mul t2, t0, t1", .{ .t0 = 0x123456, .t1 = 0x111555, .t2 = 0xFE0C6E8E });
-    try checkInstr(.{ .t0 = 0x123456, .t1 = 0x111555 }, "mulh t2, t0, t1", .{ .t0 = 0x123456, .t1 = 0x111555, .t2 = 0x136 });
-    try checkInstr(.{ .t0 = 0x123456, .t1 = 0x111555 }, "mulhu t2, t0, t1", .{ .t0 = 0x123456, .t1 = 0x111555, .t2 = 0x136 });
-    try checkInstr(.{ .t0 = 0x123456, .t1 = 0x111555 }, "mulsu t2, t0, t1", .{ .t0 = 0x123456, .t1 = 0x111555, .t2 = 0x136 });
+    try checkInstr(.{ .t0 = 0x123456, .t1 = 0x111555 }, "mul t2, t0, t1", .{ .t2 = 0xFE0C6E8E });
+    try checkInstr(.{ .t0 = 0x123456, .t1 = 0x111555 }, "mulh t2, t0, t1", .{ .t2 = 0x136 });
+    try checkInstr(.{ .t0 = 0x123456, .t1 = 0x111555 }, "mulhu t2, t0, t1", .{ .t2 = 0x136 });
+    try checkInstr(.{ .t0 = 0x123456, .t1 = 0x111555 }, "mulsu t2, t0, t1", .{ .t2 = 0x136 });
 
-    try checkInstr(.{ .t0 = 0x87123456, .t1 = 0x111555 }, "mul t2, t0, t1", .{ .t0 = 0x87123456, .t1 = 0x111555, .t2 = 0xD10C6E8E });
-    try checkInstr(.{ .t0 = 0x87123456, .t1 = 0x111555 }, "mulh t2, t0, t1", .{ .t0 = 0x87123456, .t1 = 0x111555, .t2 = 0xFFF7EE21 });
-    try checkInstr(.{ .t0 = 0x87123456, .t1 = 0x111555 }, "mulhu t2, t0, t1", .{ .t0 = 0x87123456, .t1 = 0x111555, .t2 = 0x90376 });
-    try checkInstr(.{ .t0 = 0x87123456, .t1 = 0x111555 }, "mulsu t2, t0, t1", .{ .t0 = 0x87123456, .t1 = 0x111555, .t2 = 0xFFF7EE21 });
+    try checkInstr(.{ .t0 = 0x87123456, .t1 = 0x111555 }, "mul t2, t0, t1", .{ .t2 = 0xD10C6E8E });
+    try checkInstr(.{ .t0 = 0x87123456, .t1 = 0x111555 }, "mulh t2, t0, t1", .{ .t2 = 0xFFF7EE21 });
+    try checkInstr(.{ .t0 = 0x87123456, .t1 = 0x111555 }, "mulhu t2, t0, t1", .{ .t2 = 0x90376 });
+    try checkInstr(.{ .t0 = 0x87123456, .t1 = 0x111555 }, "mulsu t2, t0, t1", .{ .t2 = 0xFFF7EE21 });
 
-    try checkInstr(.{ .t0 = 0x87123456, .t1 = 0x87111555 }, "mul t2, t0, t1", .{ .t0 = 0x87123456, .t1 = 0x87111555, .t2 = 0x2B0C6E8E });
-    try checkInstr(.{ .t0 = 0x87123456, .t1 = 0x87111555 }, "mulh t2, t0, t1", .{ .t0 = 0x87123456, .t1 = 0x87111555, .t2 = 0x39205365 });
-    try checkInstr(.{ .t0 = 0x87123456, .t1 = 0x87111555 }, "mulhu t2, t0, t1", .{ .t0 = 0x87123456, .t1 = 0x87111555, .t2 = 0x47439D10 });
-    try checkInstr(.{ .t0 = 0x87123456, .t1 = 0x87111555 }, "mulsu t2, t0, t1", .{ .t0 = 0x87123456, .t1 = 0x87111555, .t2 = 0xC03287BB });
+    try checkInstr(.{ .t0 = 0x87123456, .t1 = 0x87111555 }, "mul t2, t0, t1", .{ .t2 = 0x2B0C6E8E });
+    try checkInstr(.{ .t0 = 0x87123456, .t1 = 0x87111555 }, "mulh t2, t0, t1", .{ .t2 = 0x39205365 });
+    try checkInstr(.{ .t0 = 0x87123456, .t1 = 0x87111555 }, "mulhu t2, t0, t1", .{ .t2 = 0x47439D10 });
+    try checkInstr(.{ .t0 = 0x87123456, .t1 = 0x87111555 }, "mulsu t2, t0, t1", .{ .t2 = 0xC03287BB });
 }
 
 test "div, divu, rem, remu" {
-    try checkInstr(.{ .t0 = 50400, .t1 = 25 }, "div t2, t0, t1", .{ .t0 = 50400, .t1 = 25, .t2 = 2016 });
-    try checkInstr(.{ .t0 = 50400, .t1 = 25 }, "divu t2, t0, t1", .{ .t0 = 50400, .t1 = 25, .t2 = 2016 });
-    try checkInstr(.{ .t0 = 50400, .t1 = 26 }, "rem t2, t0, t1", .{ .t0 = 50400, .t1 = 26, .t2 = 12 });
-    try checkInstr(.{ .t0 = 50400, .t1 = 26 }, "remu t2, t0, t1", .{ .t0 = 50400, .t1 = 26, .t2 = 12 });
+    try checkInstr(.{ .t0 = 50400, .t1 = 25 }, "div t2, t0, t1", .{ .t2 = 2016 });
+    try checkInstr(.{ .t0 = 50400, .t1 = 25 }, "divu t2, t0, t1", .{ .t2 = 2016 });
+    try checkInstr(.{ .t0 = 50400, .t1 = 26 }, "rem t2, t0, t1", .{ .t2 = 12 });
+    try checkInstr(.{ .t0 = 50400, .t1 = 26 }, "remu t2, t0, t1", .{ .t2 = 12 });
 
-    try checkInstr(.{ .t0 = 0xFFFF3B20, .t1 = 25 }, "div t2, t0, t1", .{ .t0 = 0xFFFF3B20, .t1 = 25, .t2 = 0xFFFFF820 });
-    try checkInstr(.{ .t0 = 0xFFFF3B20, .t1 = 25 }, "divu t2, t0, t1", .{ .t0 = 0xFFFF3B20, .t1 = 25, .t2 = 0x0A3D68C3 });
-    try checkInstr(.{ .t0 = 0xFFFF3B20, .t1 = 26 }, "rem t2, t0, t1", .{ .t0 = 0xFFFF3B20, .t1 = 26, .t2 = 0xFFFFFFF4 });
-    try checkInstr(.{ .t0 = 0xFFFF3B20, .t1 = 26 }, "remu t2, t0, t1", .{ .t0 = 0xFFFF3B20, .t1 = 26, .t2 = 10 });
+    try checkInstr(.{ .t0 = 0xFFFF3B20, .t1 = 25 }, "div t2, t0, t1", .{ .t2 = 0xFFFFF820 });
+    try checkInstr(.{ .t0 = 0xFFFF3B20, .t1 = 25 }, "divu t2, t0, t1", .{ .t2 = 0x0A3D68C3 });
+    try checkInstr(.{ .t0 = 0xFFFF3B20, .t1 = 26 }, "rem t2, t0, t1", .{ .t2 = 0xFFFFFFF4 });
+    try checkInstr(.{ .t0 = 0xFFFF3B20, .t1 = 26 }, "remu t2, t0, t1", .{ .t2 = 10 });
 
-    try checkInstr(.{ .t0 = 0x87123456, .t1 = 0x87111555 }, "div t2, t0, t1", .{ .t0 = 0x87123456, .t1 = 0x87111555, .t2 = 0 });
-    try checkInstr(.{ .t0 = 0x87123456, .t1 = 0x87111555 }, "divu t2, t0, t1", .{ .t0 = 0x87123456, .t1 = 0x87111555, .t2 = 1 });
-    try checkInstr(.{ .t0 = 0x87123456, .t1 = 0x87111555 }, "rem t2, t0, t1", .{ .t0 = 0x87123456, .t1 = 0x87111555, .t2 = 0x87123456 });
-    try checkInstr(.{ .t0 = 0x87123456, .t1 = 0x87111555 }, "remu t2, t0, t1", .{ .t0 = 0x87123456, .t1 = 0x87111555, .t2 = 0x11F01 });
+    try checkInstr(.{ .t0 = 0xFFFF3B20, .t1 = 0xFFFFFFE7 }, "div t2, t0, t1", .{ .t2 = 2016 });
+    try checkInstr(.{ .t0 = 0xFFFF3B20, .t1 = 0xFFFFFFE7 }, "divu t2, t0, t1", .{ .t2 = 0 });
+    try checkInstr(.{ .t0 = 0xFFFF3B20, .t1 = 0xFFFC2F70 }, "divu t2, t0, t1", .{ .t2 = 1 });
+    try checkInstr(.{ .t0 = 0xFFFF3B20, .t1 = 0xFFFFFFE6 }, "rem t2, t0, t1", .{ .t2 = 0xFFFFFFF4 });
+    try checkInstr(.{ .t0 = 0xFFFF3B20, .t1 = 0xFFFFFFE6 }, "remu t2, t0, t1", .{ .t2 = 0xFFFF3B20 });
 
-    try checkInstr(.{ .t0 = 0x87123456, .t1 = 0 }, "div t2, t0, t1", .{ .t0 = 0x87123456, .t1 = 0, .t2 = 0xFFFFFFFF });
-    try checkInstr(.{ .t0 = 0x87123456, .t1 = 0 }, "divu t2, t0, t1", .{ .t0 = 0x87123456, .t1 = 0, .t2 = 0xFFFFFFFF });
-    try checkInstr(.{ .t0 = 0x87123456, .t1 = 0 }, "rem t2, t0, t1", .{ .t0 = 0x87123456, .t1 = 0, .t2 = 0x87123456 });
-    try checkInstr(.{ .t0 = 0x87123456, .t1 = 0 }, "remu t2, t0, t1", .{ .t0 = 0x87123456, .t1 = 0, .t2 = 0x87123456 });
+    try checkInstr(.{ .t0 = 50400, .t1 = 0xFFFFFFE7 }, "div t2, t0, t1", .{ .t2 = 0xFFFFF820 });
+    try checkInstr(.{ .t0 = 50400, .t1 = 0xFFFFFFE7 }, "divu t2, t0, t1", .{ .t2 = 0 });
+    try checkInstr(.{ .t0 = 50400, .t1 = 0xFFFFFFE6 }, "rem t2, t0, t1", .{ .t2 = 12 });
+    try checkInstr(.{ .t0 = 50400, .t1 = 0xFFFFFFE6 }, "remu t2, t0, t1", .{ .t2 = 50400 });
 
-    try checkInstr(.{ .t0 = 0x80000000, .t1 = 0xFFFFFFFF }, "div t2, t0, t1", .{ .t0 = 0x80000000, .t1 = 0xFFFFFFFF, .t2 = 0x80000000 });
-    try checkInstr(.{ .t0 = 0x80000000, .t1 = 0xFFFFFFFF }, "rem t2, t0, t1", .{ .t0 = 0x80000000, .t1 = 0xFFFFFFFF, .t2 = 0 });
+    try checkInstr(.{ .t0 = 0x87123456, .t1 = 0x87111555 }, "div t2, t0, t1", .{ .t2 = 0 });
+    try checkInstr(.{ .t0 = 0x87123456, .t1 = 0x87111555 }, "divu t2, t0, t1", .{ .t2 = 1 });
+    try checkInstr(.{ .t0 = 0x87123456, .t1 = 0x87111555 }, "rem t2, t0, t1", .{ .t2 = 0x87123456 });
+    try checkInstr(.{ .t0 = 0x87123456, .t1 = 0x87111555 }, "remu t2, t0, t1", .{ .t2 = 0x11F01 });
+
+    try checkInstr(.{ .t0 = 0x87123456, .t1 = 0 }, "div t2, t0, t1", .{ .t2 = 0xFFFFFFFF });
+    try checkInstr(.{ .t0 = 0x87123456, .t1 = 0 }, "divu t2, t0, t1", .{ .t2 = 0xFFFFFFFF });
+    try checkInstr(.{ .t0 = 0x87123456, .t1 = 0 }, "rem t2, t0, t1", .{ .t2 = 0x87123456 });
+    try checkInstr(.{ .t0 = 0x87123456, .t1 = 0 }, "remu t2, t0, t1", .{ .t2 = 0x87123456 });
+
+    try checkInstr(.{ .t0 = 0x80000000, .t1 = 0xFFFFFFFF }, "div t2, t0, t1", .{ .t2 = 0x80000000 });
+    try checkInstr(.{ .t0 = 0x80000000, .t1 = 0xFFFFFFFF }, "divu t2, t0, t1", .{ .t2 = 0 });
+    try checkInstr(.{ .t0 = 0x80000000, .t1 = 0xFFFFFFFF }, "rem t2, t0, t1", .{ .t2 = 0 });
+    try checkInstr(.{ .t0 = 0x80000000, .t1 = 0xFFFFFFFF }, "remu t2, t0, t1", .{ .t2 = 0x80000000 });
 }
