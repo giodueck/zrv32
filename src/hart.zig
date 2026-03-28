@@ -855,7 +855,7 @@ pub const Hart = struct {
                 const res: i32 = @truncate((@as(i64, op1) *% @as(i64, op2)) >> 32);
                 buf.res = @bitCast(res);
             },
-            riscv.Funct3.OP.mulsu => {
+            riscv.Funct3.OP.mulhsu => {
                 const op1: i32 = @bitCast(buf.op1);
                 const op1_sext: u64 = @bitCast(@as(i64, op1));
                 buf.res = @truncate((op1_sext *% @as(u64, buf.op2)) >> 32);
