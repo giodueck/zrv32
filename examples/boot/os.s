@@ -40,8 +40,7 @@
     # OS main
 
     # Set sp to end of RAM section. It will grow downwards
-    lui sp, %hi(initialsp)
-    addi sp, sp, %lo(initialsp)
+    li sp, initialsp
 
     # Reserve 256 bytes for OS stack
     # User stack starts 256 bytes lower

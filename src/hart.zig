@@ -645,7 +645,6 @@ pub const Hart = struct {
         }
 
         buf.res = 0;
-        // TODO finish
         switch (buf.decoded) {
             .R => |value| {
                 switch (value.opcode) {
