@@ -10,6 +10,8 @@ The examples cover a range of the RV32I_Zicsr_Zifencei instruction set:
 - `largeFDimmediate.s`: loading 32-bit immediate values
 - `comparisons.s`: basic integer comparisons translated to assembly
 - `sum_1_to_100.s`: branching and loops
+- `load.s`: loads
+- `store.s`: stores
 - `memory_access.s`: load and store (will not work with a read-only executable section, only for demonstration)
 - `sum_array.s`: load and store in a loop
 - `function_call.s`: implementing function calls and returns
