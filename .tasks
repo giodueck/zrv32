@@ -3,6 +3,11 @@ command=zig build
 cwd=<root>
 output=quickfix
 
+[build-debug]
+command=zig build -Duse-llvm
+cwd=<root>
+output=quickfix
+
 [build-test]
 command=zig build test
 cwd=<root>
