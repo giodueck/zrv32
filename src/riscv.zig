@@ -791,22 +791,25 @@ pub const MStatus = packed struct(u32) {
         const RoZero = enum {
             sie,
             spie,
-            spp,
-            mprv, // because we don't implement this
-            sum,
-            mxr, // because we don't implement this
             ube,
-            tvm,
-            tsr,
+            spp,
             vs,
             fs,
             xs,
-            sd,
+            mprv, // because we don't implement this
+            sum,
+            mxr, // because we don't implement this
+            tvm,
+            tsr,
             spelp,
+            sdt,
+            sd,
         };
         inline for (@typeInfo(RoZero).@"enum".fields) |f| {
             @field(self, f.name) = 0;
         }
+
+        // Only 4 fields are implemented as writable: mie, mpie, mpp and tw
 
         // Some fields have legal values
         if (self.mpp != 0 and self.mpp != 3) self.mpp = 0;
@@ -842,9 +845,10 @@ pub const MStatusH = packed struct(u32) {
         const RoZero = enum {
             sbe,
             mbe,
-            mpelp,
             gva,
             mpv,
+            mpelp,
+            mdt,
         };
         inline for (@typeInfo(RoZero).@"enum".fields) |f| {
             @field(self, f.name) = 0;
