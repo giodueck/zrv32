@@ -356,3 +356,139 @@ Consider implementing:
 - Zbs for single bit operations
 
 TODO add table of opcodes
+
+## Custom-0: Integer Exponentiation
+
+This operation behaves as it does in Factorio, limited to a precision of a 32-bit integer.
+
+#### Register-Immediate
+
+I-Type:
+```
+31                    20 19     15 14 12 11      7 6           0
+┌─┬─┬─┬─┬─┬─┬─┬─┬─┬─┬─┬─┬─┬─┬─┬─┬─┬─┬─┬─┬─┬─┬─┬─┬─┬─┬─┬─┬─┬─┬─┬─┐
+│        imm[11:0]      │   rs1   │ f3  │   rd    │    opcode   │
+└─┴─┴─┴─┴─┴─┴─┴─┴─┴─┴─┴─┴─┴─┴─┴─┴─┴─┴─┴─┴─┴─┴─┴─┴─┴─┴─┴─┴─┴─┴─┴─┘
+            12               5       3       5           7
+    I-Immediate[11:0]       src      0     dest       CUSTOM-0
+```
+
+Performs integer exponentiation with `src` as the base and the immediate value as the exponent.
+
+#### Register-Register
+
+R-Type:
+```
+31          25 24     20 19     15 14 12 11      7 6           0
+┌─┬─┬─┬─┬─┬─┬─┬─┬─┬─┬─┬─┬─┬─┬─┬─┬─┬─┬─┬─┬─┬─┬─┬─┬─┬─┬─┬─┬─┬─┬─┬─┐
+│   funct7    │   rs2   │   rs1   │ f3  │   rd    │    opcode   │
+└─┴─┴─┴─┴─┴─┴─┴─┴─┴─┴─┴─┴─┴─┴─┴─┴─┴─┴─┴─┴─┴─┴─┴─┴─┴─┴─┴─┴─┴─┴─┴─┘
+      7            5         5       3       5           7
+ 0 0 0 0 0 0 0    src1     src2      0     dest       CUSTOM-0
+```
+
+Performs integer exponentiation with `src1` as the base and `src2` as the exponent.
+
+## Custom-1: Bulk Memory Access
+
+Since a hardware register in Factorio is able to hold an arbitrary number of signals in one combinator, this is
+the obvious path to take when designing systems with a large amount of memory. However, accessing this memory
+involves several steps.
+
+For loading/storing a single value from a multi-value register:
+- Decompose the address: the block address (high bits) and the fine address (low bits). The block address refers
+  to the hardware register, while the fine address refers to the individual signal inside the register, which is
+  ultimately the value that is wanted.
+- Load the register contents (the block), using the block address.
+- In case of LOAD: Extract and return the desired value using the fine address.
+- In case of STORE: Overwrite the target value using the fine address.
+- In case of STORE: Write the block back into the register.
+
+A logical extension is to skip the steps involving the fine address and use blocks directly. This is the idea
+behind these instructions: to manipulate large amounts of data in memory simultaneously.
+
+In line with the RISC philosophy, two instructions are defined in analogy to LOAD and STORE: BLOAD and BSTORE.
+
+### Differences from LOAD/STORE encodings
+
+#### Width
+The available values of `width` are the following:
+
+width | Words | Bytes | Insn suffix
+----- | ----- | ----- | -----------
+    0 |    16 |   64  | a
+    1 |    32 |  128  | b
+    2 |    64 |  256  | c
+    3 |   128 |  512  | d
+    4 |   256 | 1024  | e
+    5 |   512 | 2048  | f
+    6 |  1024 | 4096  | g
+    7 |  2048 | 8192  | h
+
+> [!NOTE]
+> The maximum of 2048 words, or 8192 bytes, is due to the design of the memory registers, which hold 2048
+> signals in the current implementation. Given that much larger memory transfers are less likely, this
+> maximum makes sense.
+>
+> If an implementation uses memory cells which are smaller, it must nonetheless support these sizes of
+> access, and may take additional time to do so. For example, an implementation with 1024-word registers may
+> take 2 cycles to complete a 2048-word access.
+
+#### Addresses
+
+One additional restriction of these instructions is that all accesses must be 8192-byte-aligned, so as to make
+the implementation simpler.
+
+For this reason the actual memory address is not used directly. Instead, the value of `base + offset` is truncated
+by 13 bits to be 8192-byte aligned.
+
+In practice, this leaves the immediate offset fields mostly useless, since they cannot address 13 bits by themselves. *Immediate fields should thus be regarded as reserved and set to 0*.
+
+#### Bulk registers
+
+A new type of register is defined for use with this instruction: the bulk register. It is composed of 2048 32-bit
+words, just like memory cells.
+
+They are addressed 0-31 just like regular registers, but they instead refer to bulk registers. The register 0 is
+hard-wired 0, just like the regular zero register.
+
+A minimum of 3 bulk registers must be implemented, mapped to r1-r3, with any additional ones being optional. This
+allows for bulk swaps:
+```asm
+    li a0, addr0
+    li a1, addr1
+    bmlh r1, a0 ; load 2048 words into bulk r1 from address at a0
+    bmlh r2, a1 ; load 2048 words into bulk r2 from address at a1
+    bmsh r1, a1 ; store 2048 words from bulk r1 into address at a1
+    bmsh r2, a0 ; store 2048 words from bulk r2 into address at a0
+```
+
+> [!NOTE]
+> Detection of optional bulk registers can be done with bulk loads and bulk stores to verify if they copy data.
+
+These registers may be accessible to regular LOAD and STORE instructions as memory addressed registers, the location being defined by the EEI.
+
+### Bulk Load
+
+I-Type:
+```
+31                    20 19     15 14 12 11      7 6           0
+┌─┬─┬─┬─┬─┬─┬─┬─┬─┬─┬─┬─┬─┬─┬─┬─┬─┬─┬─┬─┬─┬─┬─┬─┬─┬─┬─┬─┬─┬─┬─┬─┐
+│        imm[11:0]      │   rs1   │ f3  │   rd    │    opcode   │
+└─┴─┴─┴─┴─┴─┴─┴─┴─┴─┴─┴─┴─┴─┴─┴─┴─┴─┴─┴─┴─┴─┴─┴─┴─┴─┴─┴─┴─┴─┴─┴─┘
+            12               5       3       5           7
+             0              base   width    dest      CUSTOM-1
+```
+
+### Bulk Store
+
+S-Type:
+```
+31          25 24     20 19     15 14 12 11      7 6           0
+┌─┬─┬─┬─┬─┬─┬─┬─┬─┬─┬─┬─┬─┬─┬─┬─┬─┬─┬─┬─┬─┬─┬─┬─┬─┬─┬─┬─┬─┬─┬─┬─┐
+│  imm[11:5]  │   rs2   │   rs1   │ f3  │imm[4:0] │    opcode   │
+└─┴─┴─┴─┴─┴─┴─┴─┴─┴─┴─┴─┴─┴─┴─┴─┴─┴─┴─┴─┴─┴─┴─┴─┴─┴─┴─┴─┴─┴─┴─┴─┘
+       7           5         5       3       5           7
+                  src       base   width     0         CUSTOM-1
+```
+
