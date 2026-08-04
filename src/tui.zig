@@ -42,28 +42,27 @@ const keybinds = [_][]const u8{
     "<q> Exit",
 };
 
-pub fn tuiMain(allocator: std.mem.Allocator, hart: *Hart) !void {
+pub fn tuiMain(init: std.process.Init, hart: *Hart) !void {
+    const io = init.io;
+    const gpa = init.gpa;
+
     // Initialize a tty
     var buffer: [1024]u8 = undefined;
-    var tty = try vaxis.Tty.init(&buffer);
+    var tty = try vaxis.Tty.init(io, &buffer);
     defer tty.deinit();
 
     // Initialize Vaxis
-    var vx = try vaxis.init(allocator, .{});
+    var vx = try vaxis.init(io, gpa, init.environ_map, .{});
     // deinit takes an optional allocator. If your program is exiting, you can
     // choose to pass a null allocator to save some exit time.
-    defer vx.deinit(allocator, tty.writer());
+    defer vx.deinit(gpa, tty.writer());
 
     // The event loop requires an intrusive init. We create an instance with
     // stable pointers to Vaxis and our TTY, then init the instance. Doing so
     // installs a signal handler for SIGWINCH on posix TTYs
     //
     // This event loop is thread safe. It reads the tty in a separate thread
-    var loop: vaxis.Loop(Event) = .{
-        .tty = &tty,
-        .vaxis = &vx,
-    };
-    try loop.init();
+    var loop: vaxis.Loop(Event) = .init(io, &tty, &vx);
 
     // Start the read loop. This puts the terminal in raw mode and begins
     // reading user input
@@ -76,59 +75,59 @@ pub fn tuiMain(allocator: std.mem.Allocator, hart: *Hart) !void {
     // Real state view
     var state_text_view = TextView{ .scroll_view = .{ .vertical_scrollbar = .{ .character = .{ .grapheme = " " } } } };
     var state_text_view_buffer = TextView.Buffer{};
-    defer state_text_view_buffer.deinit(allocator);
+    defer state_text_view_buffer.deinit(gpa);
 
     const state_view_title = "Current Hart State";
     var state_title_view = TextView{ .scroll_view = .{ .vertical_scrollbar = .{ .character = .{ .grapheme = " ", .width = 0 } } } };
     var state_title_view_buffer = TextView.Buffer{};
-    defer state_title_view_buffer.deinit(allocator);
-    try state_title_view_buffer.update(allocator, .{ .bytes = state_view_title });
+    defer state_title_view_buffer.deinit(gpa);
+    try state_title_view_buffer.update(gpa, .{ .bytes = state_view_title });
 
     // Logical (from the execution state PoV) state view
     var logical_state_text_view = TextView{ .scroll_view = .{ .vertical_scrollbar = .{ .character = .{ .grapheme = " " } } } };
     var logical_state_text_view_buffer = TextView.Buffer{};
-    defer logical_state_text_view_buffer.deinit(allocator);
+    defer logical_state_text_view_buffer.deinit(gpa);
 
     const logical_state_view_title = "Logical Hart State";
     var logical_state_title_view = TextView{ .scroll_view = .{ .vertical_scrollbar = .{ .character = .{ .grapheme = " ", .width = 0 } } } };
     var logical_state_title_view_buffer = TextView.Buffer{};
-    defer logical_state_title_view_buffer.deinit(allocator);
-    try logical_state_title_view_buffer.update(allocator, .{ .bytes = logical_state_view_title });
+    defer logical_state_title_view_buffer.deinit(gpa);
+    try logical_state_title_view_buffer.update(gpa, .{ .bytes = logical_state_view_title });
 
     // Text output writer
-    var raw_output_writer = std.io.Writer.Allocating.init(allocator);
+    var raw_output_writer = std.Io.Writer.Allocating.init(gpa);
     defer raw_output_writer.deinit();
-    hart.bus.setOutputCharDevWriter(&raw_output_writer.writer);
+    hart.bus.setOutputCharDevWriter(io, &raw_output_writer.writer);
 
     const output_view_title = "Output";
     var output_title_view = TextView{ .scroll_view = .{ .vertical_scrollbar = .{ .character = .{ .grapheme = " ", .width = 0 } } } };
     var output_title_view_buffer = TextView.Buffer{};
-    defer output_title_view_buffer.deinit(allocator);
-    try output_title_view_buffer.update(allocator, .{ .bytes = output_view_title });
+    defer output_title_view_buffer.deinit(gpa);
+    try output_title_view_buffer.update(gpa, .{ .bytes = output_view_title });
 
     // Text output view
     var output_text_view = TextView{ .scroll_view = .{ .vertical_scrollbar = .{ .character = .{ .grapheme = " " } } } };
     var output_text_view_buffer = TextView.Buffer{};
-    defer output_text_view_buffer.deinit(allocator);
+    defer output_text_view_buffer.deinit(gpa);
 
     // Keybinds help line
     const help_str = "Keybinds: ";
     var help_view = TextView{ .scroll_view = .{ .vertical_scrollbar = .{ .character = .{ .grapheme = " ", .width = 0 } } } };
     var help_view_buffer = TextView.Buffer{};
-    defer help_view_buffer.deinit(allocator);
-    try help_view_buffer.update(allocator, .{ .bytes = help_str });
+    defer help_view_buffer.deinit(gpa);
+    try help_view_buffer.update(gpa, .{ .bytes = help_str });
     for (keybinds, 0..) |str, i| {
-        if (i > 0) try help_view_buffer.append(allocator, .{ .bytes = " | " });
-        try help_view_buffer.append(allocator, .{ .bytes = str });
+        if (i > 0) try help_view_buffer.append(gpa, .{ .bytes = " | " });
+        try help_view_buffer.append(gpa, .{ .bytes = str });
     }
 
     // Sends queries to terminal to detect certain features. This should always
     // be called after entering the alt screen, if you are using the alt screen
-    try vx.queryTerminal(tty.writer(), 1 * std.time.ns_per_s);
+    try vx.queryTerminal(tty.writer(), std.Io.Duration.fromSeconds(1));
 
     while (true) {
         // nextEvent blocks until an event is in the queue
-        const event = loop.nextEvent();
+        const event = try loop.nextEvent();
         var step = false;
         var step_many = false;
         const many_steps_count = 128;
@@ -161,7 +160,7 @@ pub fn tuiMain(allocator: std.mem.Allocator, hart: *Hart) !void {
             // more than one byte will incur an allocation on the first render
             // after it is drawn. Thereafter, it will not allocate unless the
             // screen is resized
-            .winsize => |ws| try vx.resize(allocator, tty.writer(), ws),
+            .winsize => |ws| try vx.resize(gpa, tty.writer(), ws),
             else => {},
         }
 
@@ -205,9 +204,9 @@ pub fn tuiMain(allocator: std.mem.Allocator, hart: *Hart) !void {
             },
         });
 
-        const state_str = try hart.allocPrintState(allocator);
-        defer allocator.free(state_str);
-        try state_text_view_buffer.update(allocator, .{ .bytes = state_str });
+        const state_str = try hart.allocPrintState(gpa);
+        defer gpa.free(state_str);
+        try state_text_view_buffer.update(gpa, .{ .bytes = state_str });
         state_text_view.draw(state_win, state_text_view_buffer);
 
         // Real state title
@@ -237,10 +236,10 @@ pub fn tuiMain(allocator: std.mem.Allocator, hart: *Hart) !void {
         };
 
         // This string will have highlights, which we must manually apply by setting a style
-        var logical_state_str = try hart.allocPrintLogicalState(allocator);
+        var logical_state_str = try hart.allocPrintLogicalState(gpa);
         defer logical_state_str.deinit();
-        try logical_state_text_view_buffer.update(allocator, .{ .bytes = logical_state_str.slice });
-        try logical_state_text_view_buffer.updateStyle(allocator, .{ .style = highlight_style, .begin = logical_state_str.hi_begin, .end = logical_state_str.hi_end });
+        try logical_state_text_view_buffer.update(gpa, .{ .bytes = logical_state_str.slice });
+        try logical_state_text_view_buffer.updateStyle(gpa, .{ .style = highlight_style, .begin = logical_state_str.hi_begin, .end = logical_state_str.hi_end });
         logical_state_text_view.draw(logical_state_win, logical_state_text_view_buffer);
 
         // Logical state title
@@ -275,7 +274,7 @@ pub fn tuiMain(allocator: std.mem.Allocator, hart: *Hart) !void {
         });
         output_title_view.draw(output_title_win, output_title_view_buffer);
 
-        try output_text_view_buffer.update(allocator, .{ .bytes = raw_output_writer.written() });
+        try output_text_view_buffer.update(gpa, .{ .bytes = raw_output_writer.written() });
         output_text_view.draw(output_win, output_text_view_buffer);
 
         // Help text

@@ -131,7 +131,10 @@ const Keybinds = [_]KeyBindHelp{
     },
 };
 
-pub fn guiMain(allocator: std.mem.Allocator, hart: *Hart) !void {
+pub fn guiMain(init: std.process.Init, hart: *Hart) !void {
+    const io = init.io;
+    const gpa = init.gpa;
+
     // Initialization
     //--------------------------------------------------------------------------------------
     const screenWidth = 1000;
@@ -143,12 +146,12 @@ pub fn guiMain(allocator: std.mem.Allocator, hart: *Hart) !void {
     genesis.GuiLoadStyleGenesis();
 
     // Colors used in drawing
-    const bg_color: rl.Color = colorFromInt(rg.getStyle(.default, .{ .default = .background_color }));
-    const title_color: rl.Color = colorFromInt(rg.getStyle(.default, .{ .control = .text_color_pressed }));
-    const text_color: rl.Color = colorFromInt(rg.getStyle(.default, .{ .control = .text_color_normal }));
-    const border_color: rl.Color = colorFromInt(rg.getStyle(.default, .{ .control = .border_color_normal }));
-    const highlight_color: rl.Color = colorFromInt(rg.getStyle(.default, .{ .control = .base_color_pressed }));
-    const keybind_color: rl.Color = colorFromInt(rg.getStyle(.default, .{ .control = .base_color_pressed }));
+    const bg_color: rl.Color = colorFromInt(rg.getStyle(.default, .background_color));
+    const title_color: rl.Color = colorFromInt(rg.getStyle(.default, .text_color_pressed));
+    const text_color: rl.Color = colorFromInt(rg.getStyle(.default, .text_color_normal));
+    const border_color: rl.Color = colorFromInt(rg.getStyle(.default, .border_color_normal));
+    const highlight_color: rl.Color = colorFromInt(rg.getStyle(.default, .base_color_pressed));
+    const keybind_color: rl.Color = colorFromInt(rg.getStyle(.default, .base_color_pressed));
     const semaphore_colors: [3]rl.Color = [_]rl.Color{ .red, .yellow, .green };
 
     // Section titles
@@ -160,55 +163,55 @@ pub fn guiMain(allocator: std.mem.Allocator, hart: *Hart) !void {
     const help_view_title = "Keybind help";
 
     // Real hart state
-    var state_str = try hart.allocPrintState(allocator);
-    var state_cstr: [:0]u8 = try allocator.dupeZ(u8, state_str);
-    defer allocator.free(state_str);
-    defer allocator.free(state_cstr);
+    var state_str = try hart.allocPrintState(gpa);
+    var state_cstr: [:0]u8 = try gpa.dupeZ(u8, state_str);
+    defer gpa.free(state_str);
+    defer gpa.free(state_cstr);
 
     // Logical hart state
-    var logical_state_str = try hart.allocPrintLogicalState(allocator);
+    var logical_state_str = try hart.allocPrintLogicalState(gpa);
     defer logical_state_str.deinit();
 
     // Standalone CSR and priv state, which is not appended to the logical state
-    var csr_state_str = try hart.allocPrintCSRs(allocator);
-    defer allocator.free(csr_state_str);
+    var csr_state_str = try hart.allocPrintCSRs(gpa);
+    defer gpa.free(csr_state_str);
 
     // Text output writer
-    var text_output_writer = std.io.Writer.Allocating.init(allocator);
+    var text_output_writer = std.Io.Writer.Allocating.init(gpa);
     defer text_output_writer.deinit();
-    hart.bus.setOutputCharDevWriter(&text_output_writer.writer);
-    var text_output_cstr = try allocator.dupeZ(u8, text_output_writer.written());
-    defer allocator.free(text_output_cstr);
+    hart.bus.setOutputCharDevWriter(io, &text_output_writer.writer);
+    var text_output_cstr = try gpa.dupeZ(u8, text_output_writer.written());
+    defer gpa.free(text_output_cstr);
 
     // Text input writer
-    var text_input_writer = std.io.Writer.Allocating.init(allocator);
+    var text_input_writer = std.Io.Writer.Allocating.init(gpa);
     defer text_input_writer.deinit();
-    var text_input_slice: []u8 = try allocator.dupe(u8, text_input_writer.written());
-    defer allocator.free(text_input_slice);
-    var text_input_reader = std.io.Reader.fixed(text_input_slice);
+    var text_input_slice: []u8 = try gpa.dupe(u8, text_input_writer.written());
+    defer gpa.free(text_input_slice);
+    var text_input_reader = std.Io.Reader.fixed(text_input_slice);
     hart.bus.setInputCharDevReader(&text_input_reader);
 
     // Memory view buffer
-    const memory_view_buffer = try allocator.allocSentinel(u8, 2048, 0);
-    defer allocator.free(memory_view_buffer);
+    const memory_view_buffer = try gpa.allocSentinel(u8, 2048, 0);
+    defer gpa.free(memory_view_buffer);
     var memory_view_cstr: [:0]u8 = undefined; // must be defined in the first loop iteration
     var memory_view_address: u32 = hart.bus.getStart();
-    const memory_view_guide_buffer = try allocator.alloc(u8, 2048);
-    defer allocator.free(memory_view_guide_buffer);
+    const memory_view_guide_buffer = try gpa.alloc(u8, 2048);
+    defer gpa.free(memory_view_guide_buffer);
     var memory_view_guide_cstr: [:0]u8 = undefined; // must be defined in the first loop iteration
 
     // Memory settings view text input buffer
-    var memory_settings_input_writer = std.io.Writer.Allocating.init(allocator);
+    var memory_settings_input_writer = std.Io.Writer.Allocating.init(gpa);
     try memory_settings_input_writer.writer.writeAll("0x");
     defer memory_settings_input_writer.deinit();
 
-    const input_buffer = try allocator.allocSentinel(u8, 2048, 0);
+    const input_buffer = try gpa.allocSentinel(u8, 2048, 0);
     @memset(input_buffer, 0);
-    defer allocator.free(input_buffer);
+    defer gpa.free(input_buffer);
 
     // General purpose text buffer
-    const gp_buffer = try allocator.allocSentinel(u8, 2048, 0);
-    defer allocator.free(gp_buffer);
+    const gp_buffer = try gpa.allocSentinel(u8, 2048, 0);
+    defer gpa.free(gp_buffer);
 
     // Use a monospaced font instead of the default
     const font = try rl.loadFontFromMemory(".ttf", hack_ttf, 16, &charset);
@@ -227,8 +230,8 @@ pub fn guiMain(allocator: std.mem.Allocator, hart: *Hart) !void {
     //--------------------------------------------------------------------------------------
 
     // Main loop variables
-    var screen_stack = try std.ArrayList(Screen).initCapacity(allocator, 16);
-    defer screen_stack.deinit(allocator);
+    var screen_stack = try std.ArrayList(Screen).initCapacity(gpa, 16);
+    defer screen_stack.deinit(gpa);
     screen_stack.appendAssumeCapacity(.state);
 
     var show_fps = false;
@@ -345,13 +348,13 @@ pub fn guiMain(allocator: std.mem.Allocator, hart: *Hart) !void {
 
                     // Switch screens, cancel all previous inputs that advance the emulator
                     if (rl.isKeyPressed(.m)) {
-                        try screen_stack.append(allocator, .memory);
+                        try screen_stack.append(gpa, .memory);
                         step = false;
                         reset = false;
                         run = false;
                     }
                     if (rl.isKeyPressed(.h)) {
-                        try screen_stack.append(allocator, .help);
+                        try screen_stack.append(gpa, .help);
                         step = false;
                         reset = false;
                         run = false;
@@ -360,15 +363,15 @@ pub fn guiMain(allocator: std.mem.Allocator, hart: *Hart) !void {
                     // Write all text into the text_input_reader
                     if (try getTypedText(&text_input_writer.writer)) {
                         // If new text was written, update the reader
-                        const unread = try text_input_reader.allocRemaining(allocator, .unlimited);
-                        defer allocator.free(unread);
+                        const unread = try text_input_reader.allocRemaining(gpa, .unlimited);
+                        defer gpa.free(unread);
                         const written = try text_input_writer.toOwnedSlice();
-                        defer allocator.free(written);
+                        defer gpa.free(written);
                         try text_input_writer.writer.writeAll(unread);
                         try text_input_writer.writer.writeAll(written);
-                        allocator.free(text_input_slice);
+                        gpa.free(text_input_slice);
                         text_input_slice = try text_input_writer.toOwnedSlice();
-                        text_input_reader = std.io.Reader.fixed(text_input_slice);
+                        text_input_reader = std.Io.Reader.fixed(text_input_slice);
                         std.debug.print("{s}\n", .{text_input_slice});
                         hart.bus.setInputCharDevReader(&text_input_reader);
                     }
@@ -407,8 +410,8 @@ pub fn guiMain(allocator: std.mem.Allocator, hart: *Hart) !void {
                 } else if (reset) {
                     hart.reset();
                     text_output_writer.clearRetainingCapacity();
-                    allocator.free(text_output_cstr);
-                    text_output_cstr = try allocator.dupeZ(u8, "");
+                    gpa.free(text_output_cstr);
+                    text_output_cstr = try gpa.dupeZ(u8, "");
                     update_outputs = true;
                     halted = false;
                 }
@@ -418,21 +421,21 @@ pub fn guiMain(allocator: std.mem.Allocator, hart: *Hart) !void {
                     update_outputs = false;
                     if (show_logical_state) {
                         logical_state_str.deinit();
-                        logical_state_str = try hart.allocPrintLogicalState(allocator);
+                        logical_state_str = try hart.allocPrintLogicalState(gpa);
 
-                        allocator.free(csr_state_str);
-                        csr_state_str = try hart.allocPrintCSRs(allocator);
+                        gpa.free(csr_state_str);
+                        csr_state_str = try hart.allocPrintCSRs(gpa);
                     } else {
-                        allocator.free(state_str);
-                        allocator.free(state_cstr);
-                        state_str = try hart.allocPrintState(allocator);
-                        state_cstr = try allocator.dupeZ(u8, state_str);
+                        gpa.free(state_str);
+                        gpa.free(state_cstr);
+                        state_str = try hart.allocPrintState(gpa);
+                        state_cstr = try gpa.dupeZ(u8, state_str);
                     }
 
                     if (text_output_writer.written().len > 0) {
-                        allocator.free(text_output_cstr);
+                        gpa.free(text_output_cstr);
 
-                        text_output_cstr = try allocator.dupeZ(u8, text_output_writer.written());
+                        text_output_cstr = try gpa.dupeZ(u8, text_output_writer.written());
 
                         // Clear contents and write back only the portion rendered in the last frame
                         if (text_output_view_textbox.last_scroll_skip_end > 1000) {
@@ -441,13 +444,13 @@ pub fn guiMain(allocator: std.mem.Allocator, hart: *Hart) !void {
                             text_output_view_textbox.last_scroll_skip_end = 0;
 
                             // Then redupe the C str
-                            allocator.free(text_output_cstr);
-                            text_output_cstr = try allocator.dupeZ(u8, text_output_writer.written());
+                            gpa.free(text_output_cstr);
+                            text_output_cstr = try gpa.dupeZ(u8, text_output_writer.written());
                         }
                     }
 
-                    const mem = try hart.bus.getSlice(allocator, memory_view_address & 0xFFFF_FF80, 0x80);
-                    defer allocator.free(mem);
+                    const mem = try hart.bus.getSlice(gpa, memory_view_address & 0xFFFF_FF80, 0x80);
+                    defer gpa.free(mem);
                     memory_view_cstr = try bufPrintMemoryDump(memory_view_buffer, mem);
                     memory_view_guide_cstr = try bufPrintMemoryDumpGuide(memory_view_guide_buffer, memory_view_address & 0xFFFF_FF80);
                 }
@@ -459,7 +462,7 @@ pub fn guiMain(allocator: std.mem.Allocator, hart: *Hart) !void {
                     _ = screen_stack.pop();
                 }
                 if (rl.isKeyPressed(.h)) {
-                    try screen_stack.append(allocator, .help);
+                    try screen_stack.append(gpa, .help);
                 }
 
                 // ==== Raygui elements ====
@@ -474,7 +477,7 @@ pub fn guiMain(allocator: std.mem.Allocator, hart: *Hart) !void {
                     label_rect.width += @as(f32, @floatFromInt(rg.getTextWidth(label_text)));
                     _ = rg.label(label_rect, label_text);
 
-                    _ = rg.textBox(input_rect, input_buffer, 9, true);
+                    _ = rg.textBox(input_rect, input_buffer, true);
 
                     label_rect.y += font_height;
                     if (invalid_character) |c| {
@@ -929,7 +932,7 @@ fn bufPrintMemoryDump(buf: []u8, dump: []?u8) ![:0]u8 {
     var sep: []const u8 = "\n         ";
     @memset(buf, 0);
     var fba = std.heap.FixedBufferAllocator.init(buf);
-    var writer = std.io.Writer.Allocating.init(fba.allocator());
+    var writer = std.Io.Writer.Allocating.init(fba.allocator());
     for (dump, 0..) |byte, i| {
         if (byte == null) {
             try writer.writer.print("{s}--", .{sep});
@@ -946,7 +949,7 @@ fn bufPrintMemoryDump(buf: []u8, dump: []?u8) ![:0]u8 {
 fn bufPrintMemoryDumpGuide(buf: []u8, addr: u32) ![:0]u8 {
     @memset(buf, 0);
     var fba = std.heap.FixedBufferAllocator.init(buf);
-    var writer = std.io.Writer.Allocating.init(fba.allocator());
+    var writer = std.Io.Writer.Allocating.init(fba.allocator());
     try writer.writer.writeAll("          0  1  2  3  4  5  6  7   8  9  a  b  c  d  e  f\n");
     try writer.writer.print("{x:08}\n", .{addr});
     try writer.writer.print("{x:08}\n", .{addr + 0x10});
@@ -965,7 +968,7 @@ fn colorFromInt(int: anytype) rl.Color {
 }
 
 /// Puts all text typed in a frame into the writer. Iff any text was written, returns true.
-fn getTypedText(writer: *std.io.Writer) !bool {
+fn getTypedText(writer: *std.Io.Writer) !bool {
     var k = rl.getKeyPressed();
     if (k == .null) return false;
     while (k != .null) : (k = rl.getKeyPressed()) {

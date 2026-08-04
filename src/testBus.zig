@@ -24,7 +24,7 @@ const MemoryMap = .{
 
 pub const TestBus = struct {
     /// Hash map of 4K blocks of memory, allocated only when needed
-    ram: std.AutoArrayHashMap(u32, []u8) = undefined,
+    ram: std.array_hash_map.Auto(u32, []u8) = .empty,
 
     allocator: std.mem.Allocator = undefined,
 
@@ -35,7 +35,7 @@ pub const TestBus = struct {
 
     pub fn init(self: *@This(), allocator: std.mem.Allocator) !void {
         self.allocator = allocator;
-        self.ram = std.AutoArrayHashMap(u32, []u8).init(allocator);
+        self.ram = std.array_hash_map.Auto(u32, []u8).empty;
         self.start = TestRamStart;
     }
 
@@ -43,7 +43,7 @@ pub const TestBus = struct {
         for (self.ram.values()) |block| {
             self.allocator.free(block);
         }
-        self.ram.deinit();
+        self.ram.deinit(self.allocator);
     }
 
     pub fn interface(self: *@This()) Bus {
@@ -51,13 +51,14 @@ pub const TestBus = struct {
     }
 
     /// Stub: unimplemented
-    pub fn setOutputCharDevWriter(self: *@This(), writer: *std.io.Writer) void {
+    pub fn setOutputCharDevWriter(self: *@This(), io: std.Io, writer: *std.Io.Writer) void {
         _ = self;
+        _ = io;
         _ = writer;
     }
 
     /// Stub: unimplemented
-    pub fn setInputCharDevReader(self: *@This(), reader: *std.io.Reader) void {
+    pub fn setInputCharDevReader(self: *@This(), reader: *std.Io.Reader) void {
         _ = self;
         _ = reader;
     }
@@ -83,7 +84,7 @@ pub const TestBus = struct {
                 return MemoryError.HardwareError;
             };
             block[address & ((1 << 12) - 1)] = byte;
-            self.ram.put(address >> 12, block) catch {
+            self.ram.put(self.allocator, address >> 12, block) catch {
                 self.allocator.free(block);
                 return MemoryError.HardwareError;
             };

@@ -3,7 +3,8 @@ const std = @import("std");
 pub fn build(b: *std.Build) void {
     const target = b.standardTargetOptions(.{});
     const optimize = b.standardOptimizeOption(.{.preferred_optimize_mode = .ReleaseFast});
-    const use_llvm = b.option(bool, "use-llvm", "Compile using the LLVM backend") orelse false;
+    // const use_llvm = b.option(bool, "use-llvm", "Compile using the LLVM backend") orelse false;
+    const use_llvm = true;  // Temp workaround
 
     const exe = b.addExecutable(.{
         .name = "zrv32",

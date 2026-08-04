@@ -9,23 +9,23 @@
     // on the following line intact, so that it shows up in code reviews that
     // modify the field.
     .fingerprint = 0xd8b6473613871731, // Changing this has security and trust implications.
-    .minimum_zig_version = "0.15.1",
+    .minimum_zig_version = "0.16.0",
 
     // `zig build --fetch` can be used to fetch all dependencies of a package, recursively.
     // Once all dependencies are fetched, `zig build` no longer requires
     // internet connectivity.
     .dependencies = .{
         .clap = .{
-            .url = "https://github.com/Hejsil/zig-clap/archive/refs/tags/0.11.0.tar.gz",
-            .hash = "clap-0.11.0-oBajB-HnAQDPCKYzwF7rO3qDFwRcD39Q0DALlTSz5H7e",
+            .url = "https://github.com/Hejsil/zig-clap/archive/refs/tags/0.12.0.tar.gz",
+            .hash = "clap-0.12.0-oBajB7foAQDqlSwaSG5g0yq7xGbQARUsBk5T64gAOqP5",
         },
         .vaxis = .{
-            .url = "git+https://github.com/rockorager/libvaxis.git#41fff922316dcb8776332ec460e73eaf397d5033",
-            .hash = "vaxis-0.5.1-BWNV_JJOCQAtdJyLvrYCKbKIhX9q3liQkKMAzujWS4HJ",
+            .url = "git+https://github.com/rockorager/libvaxis.git#5ca495f09f413c66789d9c5061359b941a8d82c2",
+            .hash = "vaxis-0.6.0-BWNV_KwYCgDSbZigsbwnpd5oQXBDRcAKMlkZRwbKMX7t",
         },
         .raylib_zig = .{
-            .url = "git+https://github.com/raylib-zig/raylib-zig?ref=devel#cd71c85d571027ac8033357f83b124ee051825b3",
-            .hash = "raylib_zig-5.6.0-dev-KE8REENOBQC-m5nK7M2b5aKSIubJPbPLUYcRhT7aT3RN",
+            .url = "git+https://github.com/raylib-zig/raylib-zig?ref=devel#8758f4cd3a5ae0df6941c4715257223d34c5ad3e",
+            .hash = "raylib_zig-6.0.0-KE8RECZ8BQDm-txuospkpZHbJ6DNpacUF7D88RWQ_qAe",
         },
     },
     .paths = .{

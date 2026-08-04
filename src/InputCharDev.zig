@@ -7,10 +7,10 @@ const Width = Bus.Width;
 
 const InputCharDev = @This();
 
-reader: ?*std.io.Reader = undefined,
+reader: ?*std.Io.Reader = undefined,
 addresses: [1]u32 = [1]u32{0},
 
-pub fn init(self: *InputCharDev, reader: ?*std.io.Reader, addrs: []const u32) void {
+pub fn init(self: *InputCharDev, reader: ?*std.Io.Reader, addrs: []const u32) void {
     self.reader = reader;
     for (0..self.addresses.len, addrs) |i, addr| {
         self.addresses[i] = addr;
@@ -40,8 +40,8 @@ pub fn load(self: *InputCharDev, addr: u32, width: Width) MemoryError!u32 {
     if (self.reader) |reader| {
         return reader.takeByte() catch |e| {
             return switch (e) {
-                std.io.Reader.Error.EndOfStream => std.math.maxInt(u32),
-                std.io.Reader.Error.ReadFailed => MemoryError.HardwareError,
+                std.Io.Reader.Error.EndOfStream => std.math.maxInt(u32),
+                std.Io.Reader.Error.ReadFailed => MemoryError.HardwareError,
             };
         };
     } else return std.math.maxInt(u32);

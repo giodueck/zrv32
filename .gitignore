@@ -1,7 +1,8 @@
 .zig-cache/
 zig-out/
-*.o
+zig-pkg/
 
+*.o
 out
 *.bin
 /*.s

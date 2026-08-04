@@ -35,32 +35,32 @@ pub fn SparseArray(index_type: type, data_type: type, page_index_type: type) typ
 
         table: []?*Page,
 
-        pub fn init(allocator: std.mem.Allocator) !@This() {
-            const table = try allocator.alloc(?*Page, page_table_size);
+        pub fn init(gpa: std.mem.Allocator) !@This() {
+            const table = try gpa.alloc(?*Page, page_table_size);
             @memset(table, null);
             return .{
                 .table = table,
             };
         }
 
-        pub fn deinit(self: @This(), allocator: std.mem.Allocator) void {
+        pub fn deinit(self: *@This(), gpa: std.mem.Allocator) void {
             for (self.table) |page| {
                 if (page) |p| {
-                    allocator.free(p);
+                    gpa.destroy(p);
                 }
             }
-            allocator.free(self.table);
+            gpa.free(self.table);
         }
 
         /// Set the element at the given index with the given value.
         /// If the corresponding page has not been created, an allocation occurs.
-        pub fn set(self: *@This(), allocator: std.mem.Allocator, index: I, value: D) !void {
+        pub fn set(self: *@This(), gpa: std.mem.Allocator, index: I, value: D) !void {
             const page_number: TI = @truncate(index >> @typeInfo(PI).int.bits);
             const page_index: PI = @truncate(index);
             if (self.table[page_number]) |page| {
                 page[page_index] = value;
             } else {
-                const page = try allocator.create(Page);
+                const page = try gpa.create(Page);
                 @memset(page, 0);
                 page[page_index] = value;
                 self.table[page_number] = page;
@@ -87,7 +87,7 @@ pub fn Queue(data_type: type) type {
     return struct {
         const T = data_type;
 
-        allocator: std.mem.Allocator,
+        gpa: std.mem.Allocator,
 
         ring: []T,
         /// Always indexes the value at the front of the queue. If it is equal to back, there
@@ -97,10 +97,10 @@ pub fn Queue(data_type: type) type {
         /// to front, the operation returns an error indicating the queue is full.
         back: usize = 0,
 
-        pub fn init(allocator: std.mem.Allocator, capacity: usize) !@This() {
-            const ring = try allocator.alloc(T, capacity);
+        pub fn init(gpa: std.mem.Allocator, capacity: usize) !@This() {
+            const ring = try gpa.alloc(T, capacity);
             return .{
-                .allocator = allocator,
+                .gpa = gpa,
                 .ring = ring,
                 .front = 0,
                 .back = 0,
@@ -108,7 +108,7 @@ pub fn Queue(data_type: type) type {
         }
 
         pub fn deinit(self: *@This()) void {
-            self.allocator.free(self.ring);
+            self.gpa.free(self.ring);
         }
 
         /// Add an item to the queue

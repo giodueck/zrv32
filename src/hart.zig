@@ -250,11 +250,7 @@ pub const Hart = struct {
     }
 
     /// Debugging method to print the current Hart state to stderr
-    pub fn printState(self: @This()) !void {
-        var buffer: [1024]u8 = undefined;
-        var stdout = std.fs.File.stdout().writer(&buffer);
-        const writer = &stdout.interface;
-
+    pub fn printState(self: @This(), writer: *std.Io.Writer) !void {
         try writer.print("pc: 0x{x:0>8}\n", .{self.pc});
         try writer.flush();
         const register_names = comptime a: {

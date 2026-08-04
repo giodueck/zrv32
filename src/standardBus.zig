@@ -97,7 +97,7 @@ pub const StandardBus = struct {
     /// Sparse array with pages of 4K bytes, allocated only when needed
     ram: common.SparseArray(u30, u8, u12) = undefined,
 
-    allocator: std.mem.Allocator = undefined,
+    gpa: std.mem.Allocator = undefined,
 
     start: u32 = BootRomStart,
 
@@ -108,36 +108,37 @@ pub const StandardBus = struct {
     devices: std.ArrayList(MmioDevice) = std.ArrayList(MmioDevice).empty,
 
     pub fn init(self: *@This(), allocator: std.mem.Allocator) !void {
-        self.allocator = allocator;
-        self.boot_rom = try self.allocator.alloc(u8, BootRomSize);
+        self.gpa = allocator;
+        self.boot_rom = try self.gpa.alloc(u8, BootRomSize);
         @memset(self.boot_rom, 0);
-        self.ram = try common.SparseArray(u30, u8, u12).init(self.allocator);
+        self.ram = try common.SparseArray(u30, u8, u12).init(self.gpa);
         self.start = BootRomStart;
 
         self.devices = std.ArrayList(MmioDevice).empty;
         self.clint.init(DeviceAddresses.clint);
-        try self.devices.append(self.allocator, self.clint.interface());
-        self.outchardev.init(null, DeviceAddresses.outchardev);
-        try self.devices.append(self.allocator, self.outchardev.interface());
+        try self.devices.append(self.gpa, self.clint.interface());
+
+        self.outchardev.init(null, null, DeviceAddresses.outchardev);
+        try self.devices.append(self.gpa, self.outchardev.interface());
         self.inchardev.init(null, DeviceAddresses.inchardev);
-        try self.devices.append(self.allocator, self.inchardev.interface());
+        try self.devices.append(self.gpa, self.inchardev.interface());
     }
 
     pub fn deinit(self: *@This()) void {
-        self.devices.deinit(self.allocator);
-        self.ram.deinit(self.allocator);
-        self.allocator.free(self.boot_rom);
+        self.devices.deinit(self.gpa);
+        self.ram.deinit(self.gpa);
+        self.gpa.free(self.boot_rom);
     }
 
     pub fn interface(self: *@This()) Bus {
         return Bus.implBy(self);
     }
 
-    pub fn setOutputCharDevWriter(self: *@This(), writer: *std.io.Writer) void {
-        self.outchardev.init(writer, DeviceAddresses.outchardev);
+    pub fn setOutputCharDevWriter(self: *@This(), io: std.Io, writer: *std.Io.Writer) void {
+        self.outchardev.init(io, writer, DeviceAddresses.outchardev);
     }
 
-    pub fn setInputCharDevReader(self: *@This(), reader: *std.io.Reader) void {
+    pub fn setInputCharDevReader(self: *@This(), reader: *std.Io.Reader) void {
         self.inchardev.init(reader, DeviceAddresses.inchardev);
     }
 
@@ -156,7 +157,7 @@ pub const StandardBus = struct {
     /// If allocation fails, returns a MemoryError.HardwareError, which should halt the emulator
     fn setbRam(self: *@This(), addr: u32, byte: u8) MemoryError!void {
         const address = addr - RamStart;
-        self.ram.set(self.allocator, @truncate(address), byte) catch {
+        self.ram.set(self.gpa, @truncate(address), byte) catch {
             return MemoryError.HardwareError;
         };
     }

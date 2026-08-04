@@ -33,8 +33,8 @@ _get: *const fn (*anyopaque, u32, Width) u32,
 _store: *const fn (*anyopaque, u32, u32, Width) MemoryError!void,
 _load: *const fn (*anyopaque, u32, Width) MemoryError!u32,
 _fetch: *const fn (*anyopaque, u32) MemoryError!u32,
-_setOutputCharDevWriter: *const fn (*anyopaque, *std.io.Writer) void,
-_setInputCharDevReader: *const fn (*anyopaque, *std.io.Reader) void,
+_setOutputCharDevWriter: *const fn (*anyopaque, std.Io, *std.Io.Writer) void,
+_setInputCharDevReader: *const fn (*anyopaque, *std.Io.Reader) void,
 _getStart: *const fn (*anyopaque) u32,
 _stepDevices: *const fn (*anyopaque) void,
 _getTimeAddrs: *const fn (*anyopaque) ?[4]u32,
@@ -84,11 +84,11 @@ pub fn fetch(self: Bus, addr: u32) MemoryError!u32 {
 }
 
 /// Set the text output device writer
-pub fn setOutputCharDevWriter(self: Bus, writer: *std.io.Writer) void {
-    self._setOutputCharDevWriter(self.impl, writer);
+pub fn setOutputCharDevWriter(self: Bus, io: std.Io, writer: *std.Io.Writer) void {
+    self._setOutputCharDevWriter(self.impl, io, writer);
 }
 
-pub fn setInputCharDevReader(self: Bus, reader: *std.io.Reader) void {
+pub fn setInputCharDevReader(self: Bus, reader: *std.Io.Reader) void {
     self._setInputCharDevReader(self.impl, reader);
 }
 
@@ -148,10 +148,10 @@ inline fn BusDelegate(impl_obj: anytype) type {
         pub fn fetch(impl: *anyopaque, addr: u32) MemoryError!u32 {
             return TPtr(ImplType, impl).fetch(addr);
         }
-        pub fn setOutputCharDevWriter(impl: *anyopaque, writer: *std.io.Writer) void {
-            return TPtr(ImplType, impl).setOutputCharDevWriter(writer);
+        pub fn setOutputCharDevWriter(impl: *anyopaque, io: std.Io, writer: *std.Io.Writer) void {
+            return TPtr(ImplType, impl).setOutputCharDevWriter(io, writer);
         }
-        pub fn setInputCharDevReader(impl: *anyopaque, reader: *std.io.Reader) void {
+        pub fn setInputCharDevReader(impl: *anyopaque, reader: *std.Io.Reader) void {
             return TPtr(ImplType, impl).setInputCharDevReader(reader);
         }
         pub fn getStart(impl: *anyopaque) u32 {

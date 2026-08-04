@@ -9,24 +9,22 @@ const riscv = @import("riscv.zig");
 const tui = @import("tui.zig");
 const gui = @import("gui.zig");
 
-pub fn main() !u8 {
-    var gpa = std.heap.GeneralPurposeAllocator(.{}).init;
-    const allocator = gpa.allocator();
-    defer {
-        switch (gpa.deinit()) {
-            .ok => {},
-            .leak => {
-                std.debug.print("Warning: Detected memory leaks!\n", .{});
-            },
-        }
-    }
+pub fn main(init: std.process.Init) !u8 {
+    const io = init.io;
+    const gpa = init.gpa;
 
-    var arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
+    var arena = std.heap.ArenaAllocator.init(gpa);
     defer arena.deinit();
 
-    var stderr_buf: [1024]u8 = undefined;
-    var stderr_writer = std.fs.File.stderr().writer(&stderr_buf);
+    var errbuf: [1024]u8 = undefined;
+    var stderr_writer = std.Io.File.stderr().writer(io, &errbuf);
     const stderr = &stderr_writer.interface;
+    defer stderr.flush() catch {};
+
+    var outbuf: [1024]u8 = undefined;
+    var stdout_writer = std.Io.File.stdout().writer(io, &outbuf);
+    const stdout = &stdout_writer.interface;
+    defer stdout.flush() catch {};
 
     // Parameters the program can take
     const params = [_]clap.Param(u8){
@@ -85,7 +83,7 @@ pub fn main() !u8 {
         "                   value is --ui=tui.\n" ++
         "\n";
 
-    var iter = try std.process.ArgIterator.initWithAllocator(arena.allocator());
+    var iter = try init.minimal.args.iterateAllocator(arena.allocator());
     defer iter.deinit();
 
     // Skip program name
@@ -93,7 +91,7 @@ pub fn main() !u8 {
 
     // Initialize diagnostics
     var diag = clap.Diagnostic{};
-    var cla_parser = clap.streaming.Clap(u8, std.process.ArgIterator){
+    var parser = clap.streaming.Clap(u8, std.process.Args.Iterator){
         .params = &params,
         .iter = &iter,
         .diagnostic = &diag,
@@ -102,26 +100,24 @@ pub fn main() !u8 {
     var stdout_mode = false;
     var tui_mode = true; // gui_mode = !tui_mode and !stdout_mode
     var do_test = false;
-    var boot_fd: ?std.fs.File = null;
+    var boot_fd: ?std.Io.File = null;
     var boot_filename: ?[]u8 = null;
-    var program_fd: ?std.fs.File = null;
+    var program_fd: ?std.Io.File = null;
     var program_filename: ?[]u8 = null;
     var haltaddr: u32 = 0x8000_1004;
 
     // We use the streaming parser, so we consume each argument individually
-    while (cla_parser.next() catch |err| {
+    while (parser.next() catch |err| {
         // Report useful error message and exit
         try diag.report(stderr, err);
 
         try stderr.writeAll(usage_str);
-        try stderr.flush();
         return 1;
     }) |arg| {
         // arg.param will point to the parameter which matched the argument
         switch (arg.param.id) {
             'h' => {
                 try stderr.writeAll(help_str);
-                try stderr.flush();
                 return 0;
             },
             's' => {
@@ -148,11 +144,11 @@ pub fn main() !u8 {
             // All positional args
             'p' => {
                 if (boot_fd == null) {
-                    boot_fd = try std.fs.cwd().openFile(arg.value.?, .{ .mode = .read_only });
-                    boot_filename = try allocator.dupe(u8, arg.value.?);
+                    boot_fd = try std.Io.Dir.cwd().openFile(io, arg.value.?, .{ .mode = .read_only });
+                    boot_filename = try gpa.dupe(u8, arg.value.?);
                 } else {
-                    program_fd = try std.fs.cwd().openFile(arg.value.?, .{ .mode = .read_only });
-                    program_filename = try allocator.dupe(u8, arg.value.?);
+                    program_fd = try std.Io.Dir.cwd().openFile(io, arg.value.?, .{ .mode = .read_only });
+                    program_filename = try gpa.dupe(u8, arg.value.?);
                 }
             },
             else => unreachable,
@@ -166,22 +162,22 @@ pub fn main() !u8 {
 
     // Standard bus
     var bus: ?*standardBus.StandardBus = null;
-    if (!do_test) bus = try allocator.create(standardBus.StandardBus);
+    if (!do_test) bus = try gpa.create(standardBus.StandardBus);
     defer {
-        if (bus != null) allocator.destroy(bus.?);
+        if (bus != null) gpa.destroy(bus.?);
     }
-    if (!do_test) try bus.?.init(allocator);
+    if (!do_test) try bus.?.init(gpa);
     defer {
         if (bus != null) bus.?.deinit();
     }
 
     var test_bus: ?*testBus.TestBus = null;
-    if (do_test) test_bus = try allocator.create(testBus.TestBus);
+    if (do_test) test_bus = try gpa.create(testBus.TestBus);
     defer {
-        if (test_bus != null) allocator.destroy(test_bus.?);
+        if (test_bus != null) gpa.destroy(test_bus.?);
     }
     if (do_test) {
-        try test_bus.?.init(allocator);
+        try test_bus.?.init(gpa);
         test_bus.?.halt_address = haltaddr;
     }
     defer {
@@ -192,65 +188,61 @@ pub fn main() !u8 {
 
     if (boot_fd) |fd| {
         defer {
-            allocator.free(boot_filename.?);
+            gpa.free(boot_filename.?);
             boot_filename = null;
-            fd.close();
+            fd.close(io);
         }
 
         if (do_test) {
-            const buf = try allocator.alloc(u8, 0x1000);
+            const buf = try gpa.alloc(u8, 0x1000);
             @memset(buf, 0);
-            defer allocator.free(buf);
-            var reader = fd.reader(buf);
+            defer gpa.free(buf);
+            var reader = fd.reader(io, buf);
             if (try reader.getSize() > testBus.TestRamSize) {
                 try stderr.print("Test binary \"{s}\" too large: {d} out of a maximum of {d}\n", .{ boot_filename.?, try reader.getSize(), testBus.TestRamSize });
-                try stderr.flush();
                 return 1;
             }
-            const prog = try reader.interface.readAlloc(allocator, try reader.getSize());
-            defer allocator.free(prog);
+            const prog = try reader.interface.readAlloc(gpa, try reader.getSize());
+            defer gpa.free(prog);
             hart.loadProgramBytes(testBus.TestRamStart, prog);
         } else {
-            const buf = try allocator.alloc(u8, 0x1000);
+            const buf = try gpa.alloc(u8, 0x1000);
             @memset(buf, 0);
-            defer allocator.free(buf);
-            var reader = fd.reader(buf);
+            defer gpa.free(buf);
+            var reader = fd.reader(io, buf);
             if (try reader.getSize() > standardBus.BootRomSize) {
                 try stderr.print("Boot binary \"{s}\" too large: {d} out of a maximum of {d}\n", .{ boot_filename.?, try reader.getSize(), standardBus.BootRomSize });
-                try stderr.flush();
                 return 1;
             }
-            const prog = try reader.interface.readAlloc(allocator, try reader.getSize());
-            defer allocator.free(prog);
+            const prog = try reader.interface.readAlloc(gpa, try reader.getSize());
+            defer gpa.free(prog);
             hart.loadProgramBytes(standardBus.BootRomStart, prog);
         }
     } else {
         try stderr.print("Error: No boot binary program loaded, aborting\n", .{});
         try stderr.writeAll(usage_str);
-        try stderr.flush();
         return 1;
     }
 
     if (program_fd) |fd| {
         defer {
-            allocator.free(program_filename.?);
+            gpa.free(program_filename.?);
             program_filename = null;
-            fd.close();
+            fd.close(io);
         }
 
-        const buf = try allocator.alloc(u8, 0x1000);
-        defer allocator.free(buf);
-        var reader = fd.reader(buf);
+        const buf = try gpa.alloc(u8, 0x1000);
+        defer gpa.free(buf);
+        var reader = fd.reader(io, buf);
         if (try reader.getSize() > standardBus.RamSize) {
             try stderr.print("Program binary \"{s}\" too large: {d} out of a maximum of {d}\n", .{ program_filename.?, try reader.getSize(), standardBus.RamSize });
             return 1;
         }
-        const prog = try reader.interface.readAlloc(allocator, try reader.getSize());
-        defer allocator.free(prog);
+        const prog = try reader.interface.readAlloc(gpa, try reader.getSize());
+        defer gpa.free(prog);
         hart.loadProgramBytes(standardBus.RamStart, prog);
     } else {
         try stderr.print("Warning: No program binary loaded\n", .{});
-        try stderr.flush();
     }
 
     hart.reset();
@@ -261,11 +253,11 @@ pub fn main() !u8 {
             hart.step();
         }
 
-        try hart.printState();
+        try hart.printState(stdout);
     } else if (tui_mode) {
-        try tui.tuiMain(allocator, &hart);
+        try tui.tuiMain(init, &hart);
     } else {
-        try gui.guiMain(allocator, &hart);
+        try gui.guiMain(init, &hart);
     }
 
     return 0;
