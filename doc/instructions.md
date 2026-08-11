@@ -357,9 +357,13 @@ Consider implementing:
 
 TODO add table of opcodes
 
-## Custom-0: Integer Exponentiation
+## Custom-0: Expanded integer operations
 
-This operation behaves as it does in Factorio, limited to a precision of a 32-bit integer.
+Mainly considered for the integer exponentiation operation, which is natively supported in Factorio.
+
+### Integer exponentiation
+
+This operation behaves as it does in Factorio, limited to the precision of a signed 32-bit integer.
 
 #### Register-Immediate
 
@@ -370,7 +374,7 @@ I-Type:
 │        imm[11:0]      │   rs1   │ f3  │   rd    │    opcode   │
 └─┴─┴─┴─┴─┴─┴─┴─┴─┴─┴─┴─┴─┴─┴─┴─┴─┴─┴─┴─┴─┴─┴─┴─┴─┴─┴─┴─┴─┴─┴─┴─┘
             12               5       3       5           7
-    I-Immediate[11:0]       src      0     dest       CUSTOM-0
+    I-Immediate[11:0]       src    IPOWI   dest       CUSTOM-0
 ```
 
 Performs integer exponentiation with `src` as the base and the immediate value as the exponent.
@@ -384,7 +388,7 @@ R-Type:
 │   funct7    │   rs2   │   rs1   │ f3  │   rd    │    opcode   │
 └─┴─┴─┴─┴─┴─┴─┴─┴─┴─┴─┴─┴─┴─┴─┴─┴─┴─┴─┴─┴─┴─┴─┴─┴─┴─┴─┴─┴─┴─┴─┴─┘
       7            5         5       3       5           7
- 0 0 0 0 0 0 0    src1     src2      0     dest       CUSTOM-0
+ 0 0 0 0 0 0 0    src1     src2    IPOW    dest       CUSTOM-0
 ```
 
 Performs integer exponentiation with `src1` as the base and `src2` as the exponent.
@@ -407,88 +411,84 @@ For loading/storing a single value from a multi-value register:
 A logical extension is to skip the steps involving the fine address and use blocks directly. This is the idea
 behind these instructions: to manipulate large amounts of data in memory simultaneously.
 
-In line with the RISC philosophy, two instructions are defined in analogy to LOAD and STORE: BLOAD and BSTORE.
+### Addresses
 
-### Differences from LOAD/STORE encodings
+One additional detail of these instructions is that all accesses must be 8192-byte-aligned, as the memory
+registers are. For this reason the actual memory address is not used directly. Instead, the lower 13 bits
+of `address` are masked out to be 8192-byte aligned.
 
-#### Width
-The available values of `width` are the following:
+Effectively, rs1 is used to index a memory register instead of as a byte address.
 
-width | Words | Bytes | Insn suffix
------ | ----- | ----- | -----------
-    0 |    16 |   64  | a
-    1 |    32 |  128  | b
-    2 |    64 |  256  | c
-    3 |   128 |  512  | d
-    4 |   256 | 1024  | e
-    5 |   512 | 2048  | f
-    6 |  1024 | 4096  | g
-    7 |  2048 | 8192  | h
+### Destination/Source: Bulk registers
 
-> [!NOTE]
-> The maximum of 2048 words, or 8192 bytes, is due to the design of the memory registers, which hold 2048
-> signals in the current implementation. Given that much larger memory transfers are less likely, this
-> maximum makes sense.
->
-> If an implementation uses memory cells which are smaller, it must nonetheless support these sizes of
-> access, and may take additional time to do so. For example, an implementation with 1024-word registers may
-> take 2 cycles to complete a 2048-word access.
+The rd field of the instruction refers to a special type of register, called a bulk register.
 
-#### Addresses
+Bulk registers addressed 0-31 just like regular registers. The register 0 is hard-wired 0, and not all 31
+possible registers must be implemented.
 
-One additional restriction of these instructions is that all accesses must be 8192-byte-aligned, so as to make
-the implementation simpler.
+The zero bulk register may be used for fast zeroing of memory.
 
-For this reason the actual memory address is not used directly. Instead, the value of `base + offset` is truncated
-by 13 bits to be 8192-byte aligned.
-
-In practice, this leaves the immediate offset fields mostly useless, since they cannot address 13 bits by themselves. *Immediate fields should thus be regarded as reserved and set to 0*.
-
-#### Bulk registers
-
-A new type of register is defined for use with this instruction: the bulk register. It is composed of 2048 32-bit
-words, just like memory cells.
-
-They are addressed 0-31 just like regular registers, but they instead refer to bulk registers. The register 0 is
-hard-wired 0, just like the regular zero register.
-
-A minimum of 3 bulk registers must be implemented, mapped to r1-r3, with any additional ones being optional. This
-allows for bulk swaps:
+A minimum of 3 bulk registers must be implemented, mapped to r1-r3, with any additional ones being optional.
+This allows for bulk swaps, without needing an additional instruction.
 ```asm
     li a0, addr0
     li a1, addr1
-    bmlh r1, a0 ; load 2048 words into bulk r1 from address at a0
-    bmlh r2, a1 ; load 2048 words into bulk r2 from address at a1
-    bmsh r1, a1 ; store 2048 words from bulk r1 into address at a1
-    bmsh r2, a0 ; store 2048 words from bulk r2 into address at a0
+    bulk.load r1, a0, 0 ; load 2048 words into bulk r1 from address at a0
+    bulk.load r2, a1, 0 ; load 2048 words into bulk r2 from address at a1
+    bulk.store r1, a1, 0 ; store 2048 words from bulk r1 into address at a1
+    bulk.store r2, a0, 0 ; store 2048 words from bulk r2 into address at a0
 ```
 
 > [!NOTE]
 > Detection of optional bulk registers can be done with bulk loads and bulk stores to verify if they copy data.
 
-These registers may be accessible to regular LOAD and STORE instructions as memory addressed registers, the location being defined by the EEI.
+These registers must be accessible to regular LOAD and STORE instructions as memory addressed registers, the
+location being defined by the EEI.
 
-### Bulk Load
+### Bulk load and bulk store
 
-I-Type:
-```
-31                    20 19     15 14 12 11      7 6           0
-┌─┬─┬─┬─┬─┬─┬─┬─┬─┬─┬─┬─┬─┬─┬─┬─┬─┬─┬─┬─┬─┬─┬─┬─┬─┬─┬─┬─┬─┬─┬─┬─┐
-│        imm[11:0]      │   rs1   │ f3  │   rd    │    opcode   │
-└─┴─┴─┴─┴─┴─┴─┴─┴─┴─┴─┴─┴─┴─┴─┴─┴─┴─┴─┴─┴─┴─┴─┴─┴─┴─┴─┴─┴─┴─┴─┴─┘
-            12               5       3       5           7
-             0              base   width    dest      CUSTOM-1
-```
-
-### Bulk Store
-
-S-Type:
+I-type:
 ```
 31          25 24     20 19     15 14 12 11      7 6           0
 ┌─┬─┬─┬─┬─┬─┬─┬─┬─┬─┬─┬─┬─┬─┬─┬─┬─┬─┬─┬─┬─┬─┬─┬─┬─┬─┬─┬─┬─┬─┬─┬─┐
-│  imm[11:5]  │   rs2   │   rs1   │ f3  │imm[4:0] │    opcode   │
+│i[11:8]│   imm[7:0]    │   rs1   │ f3  │   rd    │    opcode   │
 └─┴─┴─┴─┴─┴─┴─┴─┴─┴─┴─┴─┴─┴─┴─┴─┴─┴─┴─┴─┴─┴─┴─┴─┴─┴─┴─┴─┴─┴─┴─┴─┘
-       7           5         5       3       5           7
-                  src       base   width     0         CUSTOM-1
+    4           8            5       3       5           7
+  mode        mask        address  BLOAD   b.dest     CUSTOM-1
+  mode        mask        address  BSTORE  b.src      CUSTOM-1
 ```
 
+The possible values for funct3 are:
+
+Value | Name
+----- | ------
+    0 | BLOAD
+    1 | BSTORE
+
+The instruction operates with the fundamental memory registers, which store 8192 bytes in 2048 32-bit words.
+This space may be more usefully accessed if it is partitioned into smaller sectors. These sectors may be
+selected via the mask, where a 1 enables loading from/storing to the corresponding sector.
+
+The possible values for mode are:
+
+Value | Name     | Description
+----- | -------- | -----------
+    0 | ALL      | 8KiB, mask is ignored
+    1 | LOW8     | 16 512B sectors. imm\[7:0\] select sectors 0..7
+    2 | HIGH8    | 16 512B sectors. imm\[7:0\] select sectors 15..8
+ 3-15 | RESERVED | -
+
+The mask bits are interpreted differently based on the mode. The 8KiB registers are effectively split into
+16 sectors, and the effective mask is built from the given bits and mode.
+
+Mode  | Mask | Effective mask
+----- | ---- | --------------------------------------------------------
+ALL   | any  | 0xFFFF, all sectors selected
+LOW8  | 0xmm | 0x00mm, high sectors not selected, low sectors masked
+HIGH8 | 0xmm | 0xmm00, low sectors not selected, high sectors masked
+
+### Possible expansion
+
+This instruction could become a powerful SIMD instruction, with operations like `bulk.and`, `bulk.or` and
+`bulk.xor`. If operating with Factorio's overflow semantics is fine, 32-bit arithmetic operations could also
+be done with `bulk.add`, `buld.sub`, `bulk.mul`, etc.
