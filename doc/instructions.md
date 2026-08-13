@@ -492,3 +492,19 @@ HIGH8 | 0xmm | 0xmm00, low sectors not selected, high sectors masked
 This instruction could become a powerful SIMD instruction, with operations like `bulk.and`, `bulk.or` and
 `bulk.xor`. If operating with Factorio's overflow semantics is fine, 32-bit arithmetic operations could also
 be done with `bulk.add`, `buld.sub`, `bulk.mul`, etc.
+
+## Custom SYSTEM: Reset
+
+This instruction performs a system reset, and is an M-mode instruction.
+
+I-Type:
+```
+31                    20 19     15 14 12 11      7 6           0
+┌─┬─┬─┬─┬─┬─┬─┬─┬─┬─┬─┬─┬─┬─┬─┬─┬─┬─┬─┬─┬─┬─┬─┬─┬─┬─┬─┬─┬─┬─┬─┬─┐
+│        imm[11:0]      │   rs1   │ f3  │   rd    │    opcode   │
+└─┴─┴─┴─┴─┴─┴─┴─┴─┴─┴─┴─┴─┴─┴─┴─┴─┴─┴─┴─┴─┴─┴─┴─┴─┴─┴─┴─┴─┴─┴─┴─┘
+            12               5       3       5           7
+           RESET             0      PRIV     0         SYSTEM
+```
+
+Here, `RESET` is the immediate 0xFFF. This places this instruction in the designated custom SYSTEM instruction range.
