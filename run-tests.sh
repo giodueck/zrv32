@@ -1,7 +1,7 @@
 #!/bin/bash
 
 readonly TEST_PATH=./output/share/riscv-tests/isa
-readonly REGEX_TEST_FILTER='rv32u[im]-p-[^.]*$'
+readonly REGEX_TEST_FILTER='rv32[um][im]-p-[^.]*$'
 readonly TMPDIR=/tmp/riscv-tests
 
 readonly GREEN='\x1B[1;32m'
@@ -28,7 +28,7 @@ fi
 mkdir -p "$TMPDIR"
 for test in $(ls $TEST_PATH | grep -e $REGEX_TEST_FILTER); do
     riscv32-unknown-elf-objcopy -O binary "$TEST_PATH/$test" "$TMPDIR/$test.bin"
-    printf "%s:\r\t\t\t" "$test"
+    printf "%s:\r\t\t\t\t" "$test"
     haltaddr=$(printf "0x%x" $((0x$(riscv32-unknown-elf-readelf "$TEST_PATH/$test" -s | grep " tohost" | xargs | cut -d' ' -f2)+4)))
     # Test if test runs through
     _=$(timeout 2 ./zig-out/bin/zrv32 -t "$TMPDIR/$test.bin" -s --haltaddr="$haltaddr" 2>/dev/null)

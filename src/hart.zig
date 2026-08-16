@@ -91,6 +91,10 @@ pub const Hart = struct {
     /// When a machine trap is taken, mtval is either set to exception-specific information or 0
     mtval: u32 = 0,
 
+    cycle_written: bool = false,
+    time_written: bool = false,
+    instret_written: bool = false,
+
     // Pipeline buffers
     fetch_buf: FetchBuffer = .{},
     decode_buf: DecodeBuffer = .{},
@@ -1229,6 +1233,7 @@ pub const Hart = struct {
                         } else {
                             self.mcycle &= ~value;
                         }
+                        self.cycle_written = true;
                     },
                     .mcycleh => {
                         if (op == .write) {
@@ -1239,6 +1244,7 @@ pub const Hart = struct {
                         } else {
                             self.mcycle &= ~@as(u64, value) << 32;
                         }
+                        self.cycle_written = true;
                     },
                     .time => {
                         if (op == .write) {
@@ -1249,6 +1255,7 @@ pub const Hart = struct {
                         } else {
                             self.time &= ~value;
                         }
+                        self.time_written = true;
                     },
                     .timeh => {
                         if (op == .write) {
@@ -1259,6 +1266,7 @@ pub const Hart = struct {
                         } else {
                             self.time &= ~@as(u64, value) << 32;
                         }
+                        self.time_written = true;
                     },
                     .minstret => {
                         if (op == .write) {
@@ -1269,6 +1277,7 @@ pub const Hart = struct {
                         } else {
                             self.minstret &= ~value;
                         }
+                        self.instret_written = true;
                     },
                     .minstreth => {
                         if (op == .write) {
@@ -1279,6 +1288,7 @@ pub const Hart = struct {
                         } else {
                             self.minstret &= ~@as(u64, value) << 32;
                         }
+                        self.instret_written = true;
                     },
                     .mstatus => {
                         if (op == .write) {
@@ -1386,16 +1396,19 @@ pub const Hart = struct {
 
     /// Updates performance and time counters
     fn updateCounters(self: *@This(), buf: ExecuteBuffer) void {
-        if (self.mcounteren & 1 > 0) {
+        if (self.mcounteren & 1 > 0 and !self.cycle_written) {
             self.mcycle +%= 1;
         }
-        if (self.mcounteren & 4 > 0 and buf.instruction != 0 and buf.exception == null) {
+        if (self.mcounteren & 4 > 0 and buf.instruction != 0 and buf.exception == null and !self.instret_written) {
             self.minstret +%= 1;
         }
         const addrs = self.bus.getTimeAddrs();
-        if (addrs != null) {
+        if (addrs != null and !self.time_written) {
             self.time = self.bus.get(addrs.?[0], .word);
             self.time |= @as(u64, self.bus.get(addrs.?[1], .word)) << 32;
         }
+        self.cycle_written = false;
+        self.time_written = false;
+        self.instret_written = false;
     }
 };
